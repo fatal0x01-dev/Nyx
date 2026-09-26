@@ -1,0 +1,5 @@
+module my-executor
+
+go 1.24
+
+require github.com/modelcontextprotocol/go-sdk v1.0.0

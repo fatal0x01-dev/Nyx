@@ -1,0 +1,6 @@
+registry:
+  my-executor:
+    description: A simple MCP server that greets users
+    title: my-executor
+    type: server
+    image: my-executor:latest
