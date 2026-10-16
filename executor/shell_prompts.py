@@ -55,8 +55,12 @@ Rules:
 - Never use run_command or embedded Python/shell code to create, read, or write
   a requested project/configuration file; use the dedicated read_file and
   write_file actions. For a Dockerfile task, read the exact Dockerfile path
-  first (a missing-file result is normal), then write its complete contents
-  with write_file before running Docker commands.
+  first (a missing-file result is normal), inspect the project directory and
+  existing build-context files, then write complete contents with write_file.
+  Every Dockerfile COPY/ADD source must match a file or directory that actually
+  exists in the build context. Never invent a source directory such as `html/`;
+  if `index.html` exists at the context root, copy `index.html` directly to
+  Apache's document root.
 - Use CURRENT SYSTEM CONTEXT as the source of truth for the host, user, home,
   and working directory. Resolve relative paths from the reported working
   directory and expand `~` to the reported home directory. Never turn a
@@ -110,8 +114,13 @@ Rules:
   and required application files using read_file/write_file, build a named
   local image with `docker build`, then run a named container with `docker run`
   and verify that container. A task to run an existing image does not require
-  building a new image. Use Docker Compose only when the task explicitly
-  requests it.
+  building a new image. For an image-build task, read the Dockerfile and
+  diagnose build errors from the actual output, then run `docker build -t
+  <requested-image> <project-directory>` using the directory containing the
+  Dockerfile as the build context; do not assume the terminal is already in
+  that directory. Build tasks may inspect files but must not edit them unless
+  the task explicitly requests a file change. Use Docker Compose only when the
+  task explicitly requests it.
 - For port conflicts, change only the host-side published port and retry with
   another host port. Do not investigate, stop, or reconfigure host Apache or
   another host service unless explicitly requested; validate the Docker
@@ -163,7 +172,11 @@ def build_step_prompt(
             "read_file/write_file, build a named local image with `docker build`, "
             "then run a named container with `docker run` and verify it. A simple "
             "request to run an existing image may use `docker run` directly. Do "
-            "not use Compose unless explicitly requested. On a host-port conflict, "
+            "not use Compose unless explicitly requested. Inspect the build "
+            "directory before writing a Dockerfile; every COPY/ADD source must "
+            "exist in that context. For image-build tasks, read files as needed "
+            "and use the task's project directory as the build context, but do "
+            "not edit files unless explicitly requested. On a host-port conflict, "
             "try a different HOST_PORT:CONTAINER_PORT mapping; do not change or "
             "investigate host Apache/systemd. Stop only the relevant named container.\n\n"
         )

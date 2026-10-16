@@ -449,6 +449,9 @@ def test_docker_setup_prompt_prefers_docker_run_unless_compose_was_requested():
     assert "different unused directory name" in PLANNER_SYSTEM_PROMPT
     assert "Do not" in PLANNER_SYSTEM_PROMPT
     assert "host Apache" in PLANNER_SYSTEM_PROMPT
+    assert "Every Dockerfile COPY/ADD source must match" in EXECUTOR_SYSTEM_PROMPT
+    assert "copy `index.html` directly" in EXECUTOR_SYSTEM_PROMPT
+    assert "do not invent an" in PLANNER_SYSTEM_PROMPT
 
     compose_prompt = build_step_prompt(
         task_id="compose-apache",
@@ -526,6 +529,89 @@ def test_docker_setup_rejects_compose_and_host_apache_checks(monkeypatch):
     assert executor._last_step_log[0]["policy_blocked"] is True
     assert executor._last_step_log[1]["policy_blocked"] is True
     assert executor._last_step_log[2]["policy_blocked"] is True
+
+
+def test_docker_build_task_can_inspect_but_not_edit_files(monkeypatch):
+    dockerfile = "FROM httpd:latest\nCOPY index.html /usr/local/apache2/htdocs/\n"
+
+    class FakeTmux:
+        def __init__(self):
+            self.commands = []
+
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+        def run_command(self, target, command, timeout, **kwargs):
+            self.commands.append(command)
+            if len(self.commands) == 1:
+                return {
+                    "output": base64.b64encode(dockerfile.encode()).decode(),
+                    "exit_code": 0,
+                    "timed_out": False,
+                }
+            return {
+                "output": "Successfully tagged apache-server:latest",
+                "exit_code": 0,
+                "timed_out": False,
+            }
+
+    tmux = FakeTmux()
+    executor = _make_executor_for_actions(
+        [
+            {"action": "read_file", "path": "~/web-server/Dockerfile"},
+            {
+                "action": "run_command",
+                "command": "docker build -t apache-server ~/web-server",
+            },
+            {
+                "action": "done",
+                "status": "completed",
+                "result": "Built apache-server from ~/web-server.",
+            },
+        ],
+        tmux,
+    )
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+    task = Task(
+        id="build-apache",
+        description="Build a Docker image named 'apache-server' from the Dockerfile in ~/web-server",
+    )
+
+    result = executor.execute(task)
+
+    assert result["status"] == "completed"
+    assert len(tmux.commands) == 2
+    assert "COPY index.html" in executor._last_step_log[0]["output"]
+    assert tmux.commands[1] == "docker build -t apache-server ~/web-server"
+    assert Executor._requires_file_write(task.description) is False
+
+
+def test_docker_build_task_cannot_edit_dockerfile_without_file_change_request(monkeypatch):
+    class FakeTmux:
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+        @staticmethod
+        def run_command(*args, **kwargs):
+            pytest.fail("A build task must not modify files")
+
+    executor = _make_executor_for_actions(
+        [{"action": "write_file", "path": "~/web-server/Dockerfile", "content": "FROM httpd\n"}],
+        FakeTmux(),
+    )
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+
+    result = executor.execute(
+        Task(
+            id="build-apache",
+            description="Build a Docker image named apache-server from ~/web-server/Dockerfile",
+        )
+    )
+
+    assert result["status"] == "failed"
+    assert "available only for tasks that explicitly request creating or changing a file" in result["error"]
 
 
 def test_existing_directory_conflict_fails_instead_of_auto_approving(monkeypatch):

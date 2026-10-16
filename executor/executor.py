@@ -921,13 +921,26 @@ class Executor:
                         ),
                     }
 
-                if not self._requires_file_write(task.description):
+                if kind == "write_file" and not self._requires_file_write(task.description):
                     return {
                         "status": "failed",
                         "result": "",
                         "error": (
                             "Dedicated file editing is available only for tasks that explicitly "
                             "request creating or changing a file."
+                        ),
+                    }
+                if (
+                    kind == "read_file"
+                    and not self._requires_file_write(task.description)
+                    and not self._is_docker_setup_task(task.description)
+                ):
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": (
+                            "Dedicated file inspection is available only for file-edit "
+                            "or Docker setup tasks."
                         ),
                     }
 

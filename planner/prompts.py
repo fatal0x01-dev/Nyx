@@ -69,6 +69,15 @@ Rules:
   requested service/endpoint. Do not use Docker Compose unless the user
   explicitly requests Compose or a Compose file. A simple request to run an
   existing image may use `docker run` directly without building a custom image.
+- For Apache Dockerfiles, make every COPY/ADD source match an observed file or
+  directory in the build context. Inspect the project directory before writing
+  the Dockerfile when its contents are not already known; do not invent an
+  `html/` directory. If `index.html` is at the context root, copy that file
+  directly to `/usr/local/apache2/htdocs/`.
+- For image-build tasks, allow the executor to inspect the Dockerfile and use
+  the task's explicit project directory as the Docker build context, regardless
+  of the terminal's current directory. Do not bundle file edits into a build
+  task unless the plan explicitly requests a separate file-change task.
 - Keep setup tasks in dependency order: create and verify the project directory
   before file writes; create files before image builds; build before container
   runs; and run before endpoint verification. Do not schedule later tasks to
