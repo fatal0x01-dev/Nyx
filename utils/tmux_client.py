@@ -205,19 +205,32 @@ class TmuxClient:
     @staticmethod
     def _command_result(lines: list[str], start_marker: str, sentinel: str) -> tuple[str, int | None] | None:
         """Extract a command's visible output and exit code from the current screen."""
-        end_index = next((i for i, line in enumerate(lines) if sentinel in line), -1)
+        done_pattern = re.compile(rf"{re.escape(sentinel)}_(\d+)")
+        end_index = next(
+            (
+                i
+                for i, line in enumerate(lines)
+                if done_pattern.fullmatch(line.strip())
+            ),
+            -1,
+        )
         if end_index < 0:
             return None
 
         start_index = max(
-            (i for i, line in enumerate(lines[:end_index]) if start_marker in line),
+            (
+                i
+                for i, line in enumerate(lines[:end_index])
+                if line.strip() == start_marker
+            ),
             default=-1,
         )
         output_start = start_index + 1 if 0 <= start_index < end_index else 0
         output = "\n".join(lines[output_start:end_index]).strip()
         try:
-            exit_code = int(lines[end_index].split(f"{sentinel}_", 1)[1].strip())
-        except (IndexError, ValueError):
+            match = done_pattern.fullmatch(lines[end_index].strip())
+            exit_code = int(match.group(1)) if match else None
+        except ValueError:
             exit_code = None
         return output, exit_code
 

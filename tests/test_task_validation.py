@@ -396,6 +396,24 @@ def test_tmux_command_result_uses_actual_start_marker_not_echoed_wrapper():
     ) == ("captured output", 0)
 
 
+def test_tmux_command_result_ignores_sentinel_echoed_in_running_wrapper():
+    lines = [
+        "printf '\\n%s\\n' '__NYX_START_token__'; eval 'docker-compose --version'; "
+        "__nyx_status_token=$?; printf '\\n%s_%s\\n' '__NYX_DONE_token__' "
+        '"$__nyx_status_token"',
+        "__NYX_START_token__",
+        "Command 'docker-compose' not found, but can be installed with:",
+        "sudo apt install docker-compose",
+        "Do you want to install it? (N/y)",
+    ]
+
+    assert TmuxClient._command_result(
+        lines,
+        "__NYX_START_token__",
+        "__NYX_DONE_token__",
+    ) is None
+
+
 def test_tmux_capture_history_is_explicitly_opt_in(monkeypatch):
     client = TmuxClient()
     captured = []
@@ -488,7 +506,12 @@ def test_tmux_accepts_command_not_found_package_install_prompt_once(monkeypatch)
             "Do you want to install it? (N/y)"
         )
         if capture_count < 3:
-            return f"{markers['start']}\n{prompt}"
+            return (
+                f"printf '\\n%s\\n' '{markers['start']}'; eval "
+                "'docker-compose --version'; __nyx_status_echo=$?; "
+                f"printf '\\n%s_%s\\n' '{markers['done']}' \"$__nyx_status_echo\"\n"
+                f"{markers['start']}\n{prompt}"
+            )
         return f"{markers['start']}\ninstalled\n{markers['done']}_0"
 
     monkeypatch.setattr(client, "_run", fake_run)
