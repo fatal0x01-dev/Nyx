@@ -15,3 +15,14 @@ def test_detects_credential_prompt():
     assert result is not None
     assert result["kind"] == "credential"
     assert "password" in result["prompt"].lower()
+
+
+def test_detects_unsafe_ignore_cancel_prompt():
+    for prompt in (
+        "Error: Can't have a partition outside the disk!\nIgnore/Cancel?",
+        "Fix/Ignore?",
+        "(I)gnore/(C)ancel?",
+    ):
+        result = detect_human_input_need(prompt)
+        assert result is not None
+        assert result["kind"] == "unsafe_confirmation"

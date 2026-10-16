@@ -61,6 +61,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 TASK_DB_PATH = os.path.join(DATA_DIR, "task_history.db")
 CONTROL_DB_PATH = os.path.join(DATA_DIR, "orchestrator_control.db")
+HTML_REPORT_PATH = os.path.join(DATA_DIR, "nyx_report.html")
 
 # ─── Logging ─────────────────────────────────────────────────────────────────
 

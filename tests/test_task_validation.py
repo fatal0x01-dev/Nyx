@@ -196,10 +196,12 @@ def test_executor_finishes_basic_connectivity_task_after_one_successful_ping(mon
 
 def test_successful_connectivity_probe_cancels_remaining_planned_tasks(tmp_path, monkeypatch):
     store = TaskStore(str(tmp_path / "tasks.db"))
+    monkeypatch.setattr(settings, "HTML_REPORT_PATH", str(tmp_path / "nyx_report.html"))
     orchestrator = Orchestrator.__new__(Orchestrator)
     orchestrator._goal = "establish network connectivity"
     orchestrator._iteration = 0
     orchestrator._remote_context = ""
+    orchestrator._recent_terminal_context = []
     orchestrator._start_time = 0.0
     orchestrator._run_id = "connectivity-run"
     orchestrator._control = ControlPlane(str(tmp_path / "control.db"))
@@ -309,6 +311,35 @@ def test_user_guidance_is_included_in_planner_and_executor_prompts():
     assert guidance in executor_prompt
 
 
+def test_terminal_context_is_included_in_planner_prompt():
+    terminal_context = "$ ping -c 1 8.8.8.8\n64 bytes from 8.8.8.8\nexit_code=0"
+    prompt = build_plan_prompt(
+        "establish network connectivity",
+        "No completed tasks.",
+        [],
+        terminal_context=terminal_context,
+    )
+
+    assert terminal_context in prompt
+
+
+def test_orchestrator_formats_terminal_command_evidence():
+    evidence = Orchestrator._format_terminal_evidence(
+        Task(id="task-1", description="Check connectivity"),
+        [{
+            "command": "ping -c 1 8.8.8.8",
+            "output": "64 bytes from 8.8.8.8",
+            "exit_code": 0,
+            "timed_out": False,
+        }],
+    )
+
+    assert "TASK task-1: Check connectivity" in evidence
+    assert "$ ping -c 1 8.8.8.8" in evidence
+    assert "exit_code=0 timed_out=False" in evidence
+    assert "64 bytes from 8.8.8.8" in evidence
+
+
 def test_tmux_command_result_extracts_only_current_command_output():
     lines = [
         "old command: failed",
@@ -368,6 +399,122 @@ def test_tmux_exits_detected_pager_and_collects_command_result(monkeypatch):
     assert result["output"] == "status output"
     assert result["exit_code"] == 0
     assert ["send-keys", "-t", "nyx:0.0", "q"] in commands
+
+
+def test_tmux_interrupts_timed_out_command_and_waits_for_sentinel(monkeypatch):
+    client = TmuxClient()
+    commands = []
+    marker_values = {}
+    capture_count = 0
+
+    def fake_run(args):
+        commands.append(args)
+        if args[0] == "send-keys" and "Enter" in args:
+            wrapped_command = args[3]
+            marker_values["start"] = re.search(
+                r"__NYX_START_[a-f0-9]+__", wrapped_command
+            ).group(0)
+            marker_values["done"] = re.search(
+                r"__NYX_DONE_[a-f0-9]+__", wrapped_command
+            ).group(0)
+        return ""
+
+    def fake_capture_screen(target):
+        nonlocal capture_count
+        capture_count += 1
+        start = marker_values["start"]
+        if capture_count == 1:
+            return f"{start}\npartial output"
+        return f"{start}\npartial output\n{marker_values['done']}_130"
+
+    monkeypatch.setattr(client, "_run", fake_run)
+    monkeypatch.setattr(client, "capture_screen", fake_capture_screen)
+    monkeypatch.setattr("utils.tmux_client.time.sleep", lambda _: None)
+
+    result = client.run_command("nyx:0.0", "top", timeout=0, poll_interval=0)
+
+    assert result["timed_out"] is True
+    assert result["output"] == "partial output"
+    assert result["exit_code"] == 130
+    assert [cmd for cmd in commands if cmd[0] == "send-keys"][-1][3] == "C-c"
+
+
+def test_tmux_cancels_ignore_cancel_prompt_without_sending_wrapper_text(monkeypatch):
+    client = TmuxClient()
+    commands = []
+    markers = {}
+    capture_count = 0
+
+    def fake_run(args):
+        commands.append(args)
+        if args[0] == "send-keys" and "Enter" in args:
+            wrapped_command = args[3]
+            assert "\n" not in wrapped_command
+            markers["start"] = re.search(
+                r"__NYX_START_[a-f0-9]+__", wrapped_command
+            ).group(0)
+            markers["done"] = re.search(
+                r"__NYX_DONE_[a-f0-9]+__", wrapped_command
+            ).group(0)
+        return ""
+
+    def fake_capture_screen(target):
+        nonlocal capture_count
+        capture_count += 1
+        if capture_count == 1:
+            return (
+                f"{markers['start']}\nError: Can't have a partition outside the disk!\n"
+                "Ignore/Cancel?"
+            )
+        return (
+            f"{markers['start']}\nError: Can't have a partition outside the disk!\n"
+            f"Ignore/Cancel? ^C\n{markers['done']}_130"
+        )
+
+    monkeypatch.setattr(client, "_run", fake_run)
+    monkeypatch.setattr(client, "capture_screen", fake_capture_screen)
+    monkeypatch.setattr("utils.tmux_client.time.sleep", lambda _: None)
+
+    result = client.run_command("nyx:0.0", "sudo parted -l", timeout=2, poll_interval=0)
+
+    sent_keys = [command[3] for command in commands if command[0] == "send-keys"]
+    assert sent_keys[-1] == "C-c"
+    assert "__nyx_status_" not in sent_keys[-1]
+    assert result["safety_interrupted"] is True
+    assert result["human_input_needed"] is False
+    assert result["exit_code"] == 130
+    assert "canceled an unsafe interactive confirmation" in result["output"]
+
+
+def test_tmux_halts_if_unsafe_prompt_cannot_be_interrupted(monkeypatch):
+    client = TmuxClient()
+    markers = {}
+
+    def fake_run(args):
+        if args[0] == "send-keys" and "Enter" in args:
+            wrapped_command = args[3]
+            assert "\n" not in wrapped_command
+            markers["start"] = re.search(
+                r"__NYX_START_[a-f0-9]+__", wrapped_command
+            ).group(0)
+            markers["done"] = re.search(
+                r"__NYX_DONE_[a-f0-9]+__", wrapped_command
+            ).group(0)
+            return ""
+        raise TmuxError("unable to send Ctrl-C")
+
+    monkeypatch.setattr(client, "_run", fake_run)
+    monkeypatch.setattr(
+        client,
+        "capture_screen",
+        lambda target: f"{markers['start']}\nIgnore/Cancel?",
+    )
+
+    result = client.run_command("nyx:0.0", "sudo parted -l", timeout=2, poll_interval=0)
+
+    assert result["safety_interrupted"] is True
+    assert result["safety_halt"] is True
+    assert result["timed_out"] is True
 
 
 def test_systemctl_status_commands_disable_the_pager():
@@ -514,6 +661,141 @@ def test_executor_normalizes_shell_action_aliases_and_network_ping_count():
     )
     assert direct_command["action"] == "run_command"
     assert direct_command["command"] == "ping -c 1 google.com"
+
+
+def test_executor_normalizes_top_and_rejects_interactive_commands():
+    assert Executor._normalize_noninteractive_command("top") == ("top -b -n 1", None)
+    assert Executor._normalize_noninteractive_command("sudo top") == (
+        "sudo top -b -n 1",
+        None,
+    )
+    command, error = Executor._normalize_noninteractive_command("htop")
+    assert command == "htop"
+    assert error and "top -b -n 1" in error
+    assert Executor._normalize_noninteractive_command("tail -f /var/log/syslog")[1] is not None
+    assert Executor._normalize_noninteractive_command("journalctl -f")[1] is not None
+    assert Executor._normalize_noninteractive_command("ping 8.8.8.8") == (
+        "ping -c 1 8.8.8.8",
+        None,
+    )
+
+
+def test_high_risk_command_gate_blocks_disk_mutations_but_allows_read_only_listing():
+    assert Executor._high_risk_command_reason("sudo parted -l") is None
+    assert Executor._high_risk_command_reason("sudo fdisk -l /dev/vda") is None
+    assert Executor._high_risk_command_reason("lsblk -o NAME,SIZE,FSTYPE") is None
+
+    dangerous_commands = [
+        "sudo parted /dev/vda mklabel gpt",
+        "sudo -n parted -s /dev/vda mklabel gpt",
+        "mkfs.ext4 /dev/vda1",
+        "wipefs -a /dev/vda",
+        "dd if=image.iso of=/dev/vda",
+        "sudo rm -rf /etc",
+        "sudo rm -rf /",
+        "sudo chmod -R 777 /",
+        "sudo find /etc -delete",
+        "echo inspect; sudo sgdisk --zap-all /dev/vda",
+        "bash -c 'sudo parted /dev/vda mklabel gpt'",
+    ]
+    for command in dangerous_commands:
+        assert Executor._high_risk_command_reason(command) is not None, command
+
+
+def test_executor_never_sends_blocked_partition_command_to_tmux(monkeypatch):
+    class FakeTmux:
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+        @staticmethod
+        def run_command(*args, **kwargs):
+            pytest.fail("high-risk command must be blocked before reaching tmux")
+
+    executor = Executor.__new__(Executor)
+    executor._tmux = FakeTmux()
+    executor._last_step_log = []
+    executor._ssh_target = None
+    executor._remote_context = ""
+    executor._control_plane = None
+    executor._control_run_id = None
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+    monkeypatch.setattr(
+        executor,
+        "_decide_next_action",
+        lambda task, step_log, step: {
+            "action": "run_command",
+            "command": "sudo parted /dev/vda mklabel gpt",
+        },
+    )
+
+    result = executor.execute(Task(id="disk-edit", description="Inspect disk layout"))
+
+    assert result["status"] == "failed"
+    assert result["safety_blocked"] is True
+    assert "blocks partition-editing commands" in result["error"]
+    assert executor._last_step_log[0]["safety_blocked"] is True
+
+
+def test_orchestrator_stops_run_after_high_risk_command_is_blocked(tmp_path, monkeypatch):
+    store = TaskStore(str(tmp_path / "tasks.db"))
+    control = ControlPlane(str(tmp_path / "control.db"))
+    control.start_run("safety-run", "Inspect disk layout")
+    monkeypatch.setattr(settings, "HTML_REPORT_PATH", str(tmp_path / "report.html"))
+
+    orchestrator = Orchestrator.__new__(Orchestrator)
+    orchestrator._goal = "Inspect disk layout"
+    orchestrator._iteration = 0
+    orchestrator._remote_context = ""
+    orchestrator._recent_terminal_context = []
+    orchestrator._safety_halt_reason = ""
+    orchestrator._start_time = 0.0
+    orchestrator._run_id = "safety-run"
+    orchestrator._control = control
+    orchestrator._manager = TaskManager(store)
+    orchestrator._store = store
+    orchestrator._history = SimpleNamespace(as_prompt_text=lambda limit: "")
+    orchestrator._executor = SimpleNamespace(
+        execute=lambda task: {
+            "status": "failed",
+            "result": "",
+            "error": "Partition editing is blocked.",
+            "safety_blocked": True,
+        },
+        _last_step_log=[{
+            "command": "sudo parted /dev/vda mklabel gpt",
+            "output": "Partition editing is blocked.",
+            "exit_code": None,
+            "timed_out": False,
+        }],
+    )
+    plan_calls = []
+
+    def create_dangerous_task(**kwargs):
+        plan_calls.append(kwargs)
+        return {
+            "action": "create_tasks",
+            "tasks": [{"id": "danger", "description": "Inspect disk layout"}],
+        }
+
+    orchestrator._planner = SimpleNamespace(plan=create_dangerous_task)
+    finishes = []
+    monkeypatch.setattr(orchestrator, "_finish", lambda **kwargs: finishes.append(kwargs))
+
+    orchestrator._loop()
+
+    task = store.get_task("danger")
+    assert task is not None
+    assert task.status.value == "failed"
+    assert task.retries == 0
+    assert len(plan_calls) == 1
+    assert finishes == [{
+        "success": False,
+        "message": (
+            "Nyx blocked or canceled an unsafe operation and stopped the run without retrying it. "
+            "Review the goal and terminal before starting another run."
+        ),
+    }]
 
 
 def test_file_edit_tasks_refuse_non_write_actions():

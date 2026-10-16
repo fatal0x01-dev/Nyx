@@ -34,6 +34,7 @@ class Planner:
         pending_tasks: list[Task],
         remote_context: str = "",
         guidance_text: str = "",
+        terminal_context: str = "",
     ) -> dict:
         """
         Ask the planner what to do next.
@@ -48,7 +49,12 @@ class Planner:
             for t in pending_tasks
         ]
         user_prompt = build_plan_prompt(
-            goal, history_text, pending_dicts, remote_context, guidance_text
+            goal,
+            history_text,
+            pending_dicts,
+            remote_context,
+            guidance_text,
+            terminal_context,
         )
 
         log.debug("Planner prompt (user):\n%s", user_prompt[:600])
@@ -89,6 +95,7 @@ class Planner:
         history_text: str,
         remote_context: str = "",
         guidance_text: str = "",
+        terminal_context: str = "",
     ) -> dict:
         """Return {action: accepted|rejected, ...} after validating a task result."""
         user_prompt = build_validation_prompt(
@@ -99,6 +106,7 @@ class Planner:
             history_text=history_text,
             remote_context=remote_context,
             guidance_text=guidance_text,
+            terminal_context=terminal_context,
         )
         raw = self._call_lmstudio_for_validation(user_prompt)
         result_json = parse_json_response(raw)

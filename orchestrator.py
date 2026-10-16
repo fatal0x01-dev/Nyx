@@ -37,6 +37,7 @@ from utils.helpers import new_id, utcnow
 from utils.ssh import SSHConfig
 from utils.tmux_client import TmuxError
 from utils.control_plane import ControlPlane
+from utils.html_report import write_html_report
 
 log = get_logger(__name__)
 reasoning = get_reasoning_logger(__name__)
@@ -61,6 +62,8 @@ class Orchestrator:
         self._iteration: int = 0
         self._start_time: float = 0.0
         self._remote_context: str = ""
+        self._recent_terminal_context: list[str] = []
+        self._safety_halt_reason: str = ""
         self._control = ControlPlane(cfg.CONTROL_DB_PATH)
         self._run_id: str = ""
 
@@ -71,9 +74,12 @@ class Orchestrator:
         self._goal = goal
         self._iteration = 0
         self._start_time = time.time()
+        self._recent_terminal_context = []
+        self._safety_halt_reason = ""
         self._run_id = new_id()
         self._control.start_run(self._run_id, goal)
         self._executor.configure_control_plane(self._control, self._run_id)
+        self._publish_report()
 
         log.info("=" * 60)
         log.info("ORCHESTRATOR START")
@@ -100,6 +106,7 @@ class Orchestrator:
                 phase="Interrupted",
                 status="interrupted",
             )
+            self._publish_report()
             log.warning("Interrupted by user — state saved, resume any time.")
             sys.exit(0)
         except Exception:
@@ -108,6 +115,7 @@ class Orchestrator:
                 phase="Stopped after an unexpected error",
                 status="failed",
             )
+            self._publish_report()
             raise
 
     # ── Pre-flight ────────────────────────────────────────────────────────
@@ -184,6 +192,7 @@ class Orchestrator:
                     pending_tasks=pending_tasks,
                     remote_context=self._remote_context,
                     guidance_text=guidance_text,
+                    terminal_context=self._terminal_context_text(),
                 )
             except RuntimeError as e:
                 log.error("Planner error: %s", e)
@@ -248,6 +257,10 @@ class Orchestrator:
                 current_task=task.description,
             )
             self._run_task(task)
+            safety_halt_reason = getattr(self, "_safety_halt_reason", "")
+            if safety_halt_reason:
+                self._finish(success=False, message=safety_halt_reason)
+                return
             if self._connectivity_goal_satisfied(
                 self._goal,
                 getattr(self._executor, "_last_step_log", []),
@@ -320,7 +333,39 @@ class Orchestrator:
             phase=phase,
             iteration=self._iteration,
         )
-        return self._control.wait_if_paused(self._run_id)
+        self._publish_report()
+        guidance = self._control.wait_if_paused(self._run_id)
+        return guidance
+
+    def _publish_report(self) -> None:
+        write_html_report(
+            cfg.HTML_REPORT_PATH,
+            self._control.snapshot(self._run_id or None),
+            self._store.get_all_tasks(),
+        )
+
+    def _terminal_context_text(self) -> str:
+        return "\n\n".join(self._recent_terminal_context[-8:])[-12000:]
+
+    @staticmethod
+    def _format_terminal_evidence(task: Task, step_log: list[dict]) -> str:
+        if not step_log:
+            return ""
+        lines = [f"TASK {task.id}: {task.description}"]
+        for step in step_log:
+            if not isinstance(step, dict):
+                continue
+            command = str(step.get("command", "")).strip()
+            output = str(step.get("output", "")).strip()
+            if not command and not output:
+                continue
+            lines.append(f"$ {command or '(no command)'}")
+            lines.append(
+                f"exit_code={step.get('exit_code')} timed_out={step.get('timed_out', False)}"
+            )
+            if output:
+                lines.append(output[-1600:])
+        return "\n".join(lines)
 
     # ── Task execution ────────────────────────────────────────────────────
 
@@ -339,6 +384,7 @@ class Orchestrator:
                 history_text=self._history.as_prompt_text(limit=20),
                 remote_context=self._remote_context,
                 guidance_text=guidance_text,
+                terminal_context=self._terminal_context_text(),
             )
         except RuntimeError as e:
             log.warning("Planner validation rejected task %s because validation call failed: %s", task.id, e)
@@ -364,12 +410,32 @@ class Orchestrator:
         )
         self._manager.mark_running(task)
         self._store.log_event(task.id, "started")
+        self._publish_report()
 
         try:
             result = self._executor.execute(task)
         except Exception as e:
             log.exception("Unexpected executor error for task %s", task.id)
             result = {"status": "failed", "error": str(e), "result": ""}
+        if result.get("safety_halt"):
+            self._safety_halt_reason = (
+                "Nyx could not confirm that the unsafe terminal prompt was canceled. "
+                "The orchestrator stopped without sending further commands; inspect the terminal manually."
+            )
+        elif result.get("safety_blocked"):
+            self._safety_halt_reason = (
+                "Nyx blocked or canceled an unsafe operation and stopped the run without retrying it. "
+                "Review the goal and terminal before starting another run."
+            )
+
+        terminal_evidence = self._format_terminal_evidence(
+            task,
+            getattr(self._executor, "_last_step_log", []),
+        )
+        if terminal_evidence:
+            self._recent_terminal_context.append(terminal_evidence)
+            self._recent_terminal_context = self._recent_terminal_context[-8:]
+            task.metadata["terminal_evidence"] = terminal_evidence
 
         status = result.get("status", "failed")
         result_text = result.get("result", "")
@@ -411,7 +477,7 @@ class Orchestrator:
             self._store.log_event(task.id, "completed", result_text[:500])
         else:
             reasoning.warning("Task %s failed or needs retry: %s", task.id, error_text[:200] if error_text else result_text[:200] if result_text else "unknown failure")
-            if task.retries < cfg.MAX_TASK_RETRIES:
+            if task.retries < cfg.MAX_TASK_RETRIES and not result.get("safety_blocked"):
                 self._manager.mark_retry(task, error_text)
                 self._store.log_event(task.id, "retry", error_text[:300])
             else:
@@ -422,6 +488,7 @@ class Orchestrator:
                     task.id,
                     cfg.MAX_TASK_RETRIES,
                 )
+        self._publish_report()
 
     # ── Helpers ───────────────────────────────────────────────────────────
 
@@ -448,6 +515,7 @@ class Orchestrator:
             )
             self._manager.add_task(task)
             existing_descriptions.add(description.lower())
+            self._publish_report()
 
     def _finish(self, success: bool, message: str):
         elapsed = time.time() - self._start_time
@@ -464,6 +532,7 @@ class Orchestrator:
                 status="completed" if success else "failed",
                 current_task="",
             )
+            self._publish_report()
 
 def parse_cli_args(argv: list[str] | None = None) -> tuple[str, SSHConfig | None]:
     """Parse the goal and optional SSH connection parameters."""

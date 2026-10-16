@@ -37,6 +37,15 @@ Rules:
 - Prefer non-interactive, non-destructive commands. Never run anything that
   wipes data, force-pushes, or changes permissions broadly unless the task
   explicitly requires it.
+- Never modify partition tables, format/erase disks, write raw data to devices,
+  or recursively delete system directories. Nyx blocks these commands; do not
+  try alternate tools or shell wrappers to bypass that safeguard.
+- Never place follow-up commands after a potentially interactive command.
+  Nyx sends commands as a single shell input line and interrupts recognized
+  unsafe prompts instead of selecting an option.
+- If a terminal reports "Ignore/Cancel?", "Fix/Ignore", or asks to write disk
+  changes, do not choose an option. Nyx will cancel the command and stop if it
+  cannot confirm the terminal returned to a shell prompt.
 - If a command's output shows an error, diagnose it using the visible output
   and this task's prior command output before retrying — don't repeat a failing command
   unchanged.

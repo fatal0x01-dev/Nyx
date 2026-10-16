@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 
 import config.settings as cfg
 from executor.shell_prompts import SYSTEM_PROMPT, build_step_prompt
@@ -29,6 +30,34 @@ reasoning = get_reasoning_logger(__name__)
 
 
 class Executor:
+    DISK_MUTATION_COMMANDS = {
+        "blkdiscard",
+        "fdisk",
+        "parted",
+        "pvcreate",
+        "pvremove",
+        "sfdisk",
+        "sgdisk",
+        "shred",
+        "vgcreate",
+        "vgremove",
+        "lvcreate",
+        "lvremove",
+        "mdadm",
+        "wipefs",
+    }
+    INTERACTIVE_COMMANDS = {
+        "btop": "Use `top -b -n 1` for a one-shot process snapshot.",
+        "htop": "Use `top -b -n 1` for a one-shot process snapshot.",
+        "less": "Use `cat`, `sed -n`, or `head` for non-interactive output.",
+        "man": "Use `command --help` or read the relevant documentation non-interactively.",
+        "more": "Use `cat`, `sed -n`, or `head` for non-interactive output.",
+        "nano": "Use a non-interactive file-edit command, or request human input.",
+        "vi": "Use a non-interactive file-edit command, or request human input.",
+        "vim": "Use a non-interactive file-edit command, or request human input.",
+        "watch": "Run the watched command once without `watch`.",
+    }
+
     def __init__(self):
         self._client = LMStudioClient(
             base_url=cfg.EXECUTOR_API_URL,
@@ -90,6 +119,190 @@ class Executor:
             command,
             count=1,
         )
+
+    @staticmethod
+    def _high_risk_command_reason(command: str) -> str | None:
+        """Refuse model-generated disk layout, filesystem, and raw-device mutations."""
+        try:
+            lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>")
+            lexer.whitespace_split = True
+            tokens = list(lexer)
+        except ValueError:
+            return "The command could not be safely parsed, so Nyx refused to run it."
+        separators = {";", "&&", "||", "|", "|&", "&"}
+        command_parts: list[list[str]] = [[]]
+        for token in tokens:
+            if token in separators:
+                command_parts.append([])
+            else:
+                command_parts[-1].append(token)
+
+        for part in command_parts:
+            if not part:
+                continue
+            index = 0
+            while index < len(part) and part[index].rsplit("/", 1)[-1] in {"sudo", "command"}:
+                index += 1
+                if part[index - 1].rsplit("/", 1)[-1] == "sudo":
+                    while index < len(part) and part[index].startswith("-"):
+                        if part[index] in {"-u", "-g", "-h", "-p"}:
+                            index += 2
+                        else:
+                            index += 1
+            if index < len(part) and part[index] == "env":
+                index += 1
+                while index < len(part) and "=" in part[index] and not part[index].startswith("-"):
+                    index += 1
+            if index < len(part) and part[index].endswith("=") and index == 0:
+                index += 1
+            if index >= len(part):
+                continue
+            executable = part[index].rsplit("/", 1)[-1].lower()
+            arguments = part[index + 1:]
+
+            if executable in {"sh", "bash", "dash", "zsh"} and "-c" in arguments:
+                script_index = arguments.index("-c") + 1
+                if script_index < len(arguments):
+                    nested_reason = Executor._high_risk_command_reason(arguments[script_index])
+                    if nested_reason:
+                        return nested_reason
+
+            # Permit only the explicit listing forms; all other parted/fdisk
+            # invocations are refused because they can rewrite disk layouts.
+            if executable in {"parted", "fdisk"}:
+                read_only = bool(arguments) and arguments[0] in {"-l", "--list"} and all(
+                    argument == "--" or argument.startswith("/dev/")
+                    for argument in arguments[1:]
+                )
+                if read_only:
+                    continue
+                return (
+                    f"`{executable}` can change disk partition layouts. "
+                    "Nyx blocks partition-editing commands; inspect disks with `lsblk` "
+                    "and make any required disk changes manually."
+                )
+            if executable.startswith("mkfs") or executable in Executor.DISK_MUTATION_COMMANDS:
+                if executable.startswith("mkfs"):
+                    detail = "format a filesystem"
+                elif executable == "mdadm":
+                    if not any(
+                        option in arguments
+                        for option in ("--create", "--zero-superblock", "--remove", "--stop")
+                    ):
+                        continue
+                    detail = "create or modify software RAID metadata"
+                elif executable in {"pvcreate", "vgcreate"}:
+                    detail = "initialize or modify storage volumes"
+                else:
+                    detail = "erase or modify raw-disk data"
+                return (
+                    f"`{executable}` can {detail}. Nyx blocks destructive disk operations; "
+                    "perform this operation manually after independently verifying the target."
+                )
+            if executable == "cryptsetup" and arguments and arguments[0] in {
+                "luksFormat", "luksErase", "luksChangeKey", "erase", "reencrypt",
+            }:
+                return (
+                    f"`cryptsetup {arguments[0]}` can destroy or replace encryption metadata. "
+                    "Nyx blocks destructive disk operations."
+                )
+            if executable == "dd" and any(
+                argument.startswith("of=/dev/") for argument in arguments
+            ):
+                return (
+                    "`dd` targeting a device can overwrite a disk. Nyx blocks raw-device "
+                    "writes; perform this operation manually after independently verifying the target."
+                )
+            if executable == "rm":
+                recursive = any(
+                    argument.startswith("-") and "r" in argument.lstrip("-")
+                    for argument in arguments
+                )
+                system_targets = {
+                    "/", "/*", "/boot", "/dev", "/etc", "/home", "/lib",
+                    "/opt", "/root", "/sbin", "/sys", "/usr", "/var",
+                }
+                if recursive and any(Executor._is_system_wide_target(argument, system_targets) for argument in arguments):
+                    return (
+                        "`rm` recursively targeting a system-wide directory can destroy the OS "
+                        "or user data. Nyx blocks this command."
+                    )
+            if executable in {"chmod", "chown"}:
+                recursive = any(
+                    argument.startswith("-") and "R" in argument.lstrip("-")
+                    for argument in arguments
+                )
+                system_targets = {
+                    "/", "/*", "/boot", "/dev", "/etc", "/home", "/lib",
+                    "/opt", "/root", "/sbin", "/sys", "/usr", "/var",
+                }
+                if recursive and any(Executor._is_system_wide_target(argument, system_targets) for argument in arguments):
+                    return (
+                        f"`{executable}` recursively changing a system-wide directory can "
+                        "break the OS or expose user data. Nyx blocks this command."
+                    )
+            if executable == "find" and "-delete" in arguments:
+                system_targets = {
+                    "/", "/boot", "/dev", "/etc", "/home", "/lib",
+                    "/opt", "/root", "/sbin", "/sys", "/usr", "/var",
+                }
+                search_paths = [
+                    argument for argument in arguments
+                    if not argument.startswith("-") and "=" not in argument
+                ]
+                if any(Executor._is_system_wide_target(path, system_targets) for path in search_paths):
+                    return (
+                        "`find -delete` targeting system-wide paths can destroy the OS or "
+                        "user data. Nyx blocks this command."
+                    )
+        return None
+
+    @staticmethod
+    def _is_system_wide_target(path: str, roots: set[str]) -> bool:
+        normalized = path.rstrip("/") or "/"
+        return normalized in roots or any(
+            normalized.startswith(root.rstrip("/") + "/")
+            or normalized.startswith(root.rstrip("/") + "/*")
+            for root in roots
+            if root != "/"
+        )
+
+    @staticmethod
+    def _normalize_noninteractive_command(command: str) -> tuple[str, str | None]:
+        """Convert supported interactive commands or reject commands with no safe batch mode."""
+        try:
+            tokens = shlex.split(command, posix=True)
+        except ValueError:
+            return command, None
+        if not tokens:
+            return command, None
+
+        command_index = 1 if tokens[0] == "sudo" and len(tokens) > 1 else 0
+        executable = tokens[command_index].rsplit("/", 1)[-1].lower()
+        shell_operators = {";", "&&", "||", "|", ">", ">>", "<"}
+        if executable == "top" and not any(token in shell_operators for token in tokens):
+            if "-b" not in tokens[command_index + 1:]:
+                tokens.insert(command_index + 1, "-b")
+            if "-n" not in tokens[command_index + 1:] and "-bn" not in tokens[command_index + 1:]:
+                tokens.extend(("-n", "1"))
+            return shlex.join(tokens), None
+
+        reason = Executor.INTERACTIVE_COMMANDS.get(executable)
+        if reason:
+            return command, (
+                f"`{executable}` is interactive and cannot be run by Nyx safely. {reason}"
+            )
+        if executable == "tail" and any(arg == "-f" or arg.startswith("--follow") for arg in tokens[command_index + 1:]):
+            return command, "`tail -f` is a continuous interactive stream. Use a bounded `tail -n N` command instead."
+        if executable == "journalctl" and any(arg in {"-f", "--follow"} for arg in tokens[command_index + 1:]):
+            return command, "`journalctl -f` is a continuous stream. Use a bounded `journalctl --no-pager -n N` command instead."
+        if executable == "ping" and not any(
+            token == "-c" or token.startswith("--count") or re.fullmatch(r"-c\d+", token)
+            for token in tokens[command_index + 1:]
+        ):
+            tokens[command_index + 1:command_index + 1] = ["-c", "1"]
+            return shlex.join(tokens), None
+        return command, None
 
     def connect_ssh(self, config: SSHConfig) -> str:
         """Connect through tmux and return the remote execution context."""
@@ -474,6 +687,34 @@ class Executor:
                         }
 
                 command = normalize_multiline_write_command(command)
+                safety_error = self._high_risk_command_reason(command)
+                if safety_error:
+                    log.error("Task %s: blocked high-risk command: %s", task.id, safety_error)
+                    step_log.append({
+                        "command": command,
+                        "output": safety_error,
+                        "exit_code": None,
+                        "timed_out": False,
+                        "safety_blocked": True,
+                    })
+                    self._last_step_log = list(step_log)
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": safety_error,
+                        "safety_blocked": True,
+                    }
+                command, interactive_error = self._normalize_noninteractive_command(command)
+                if interactive_error:
+                    log.warning("Task %s: %s", task.id, interactive_error)
+                    step_log.append({
+                        "command": command,
+                        "output": interactive_error,
+                        "exit_code": None,
+                        "timed_out": False,
+                    })
+                    self._last_step_log = list(step_log)
+                    continue
                 command = self._disable_systemctl_pager(command)
                 log.info("Task %s: running `%s`", task.id, command)
                 try:
@@ -483,7 +724,44 @@ class Executor:
                         timeout=cfg.SHELL_COMMAND_TIMEOUT,
                     )
                 except TmuxError as e:
-                    result = {"output": str(e), "exit_code": None, "timed_out": False}
+                    log.error(
+                        "Task %s: terminal state is unknown after tmux error; stopping safely: %s",
+                        task.id,
+                        e,
+                    )
+                    self._last_step_log = list(step_log)
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": f"Terminal state could not be verified after tmux error: {e}",
+                        "safety_blocked": True,
+                        "safety_halt": True,
+                    }
+
+                if result.get("timed_out"):
+                    log.warning(
+                        "Task %s: command timed out; tmux interruption is handled by the command runner.",
+                        task.id,
+                    )
+                if result.get("safety_interrupted"):
+                    step_log.append({
+                        "command": command,
+                        "output": result["output"],
+                        "exit_code": result.get("exit_code"),
+                        "timed_out": result.get("timed_out", False),
+                        "safety_interrupted": True,
+                    })
+                    self._last_step_log = list(step_log)
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": (
+                            "Nyx canceled an unsafe interactive confirmation and stopped "
+                            "this task without choosing an option."
+                        ),
+                        "safety_blocked": True,
+                        "safety_halt": result.get("safety_halt", False),
+                    }
 
                 if result.get("human_input_needed"):
                     input_info = detect_human_input_need(result.get("output", ""))

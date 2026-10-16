@@ -42,6 +42,8 @@ Rules:
 - If recent tasks have failed, decide whether to retry differently or give up.
 - Do not create duplicate tasks for work already pending, running, or completed successfully.
 - Treat user guidance as additional direction for this run, while preserving the stated goal and safety rules.
+- Use recent terminal output as direct evidence of what commands actually did; do not infer success from a task description alone.
+- Prefer the most recent relevant output over older or contradictory terminal evidence.
 - For a goal that only asks to establish/check basic network or internet connectivity,
   prefer one bounded external ping as the decisive check. Do not queue additional
   diagnostics or service restarts after a successful reply; never restart networking
@@ -73,6 +75,7 @@ Return ONLY valid JSON with one of these actions:
 
 Rules:
 - Reject weak evidence, empty results, generic claims, or output that does not prove the task actually happened.
+- Treat recent terminal output as direct evidence and check it against the stated task and goal.
 - Accept only when the result is specific, relevant, and matches the task goal.
 - If the task likely needs more work, reject it.
 - Never respond with markdown or extra text.
@@ -85,6 +88,7 @@ def build_plan_prompt(
     pending_tasks: list[dict],
     remote_context: str = "",
     guidance_text: str = "",
+    terminal_context: str = "",
 ) -> str:
     pending_str = (
         "\n".join(
@@ -104,6 +108,9 @@ EXECUTION ENVIRONMENT:
 USER GUIDANCE FOR THIS RUN:
 {guidance_text or "(none)"}
 
+RECENT TERMINAL OUTPUT FROM THIS RUN:
+{terminal_context or "(no terminal commands have run yet)"}
+
 TASK HISTORY (most recent completions):
 {history_text}
 
@@ -122,6 +129,7 @@ def build_validation_prompt(
   history_text: str,
   remote_context: str = "",
   guidance_text: str = "",
+  terminal_context: str = "",
 ) -> str:
   return f"""GOAL:
 {goal}
@@ -131,6 +139,9 @@ EXECUTION ENVIRONMENT:
 
 USER GUIDANCE FOR THIS RUN:
 {guidance_text or "(none)"}
+
+RECENT TERMINAL OUTPUT FROM THIS RUN:
+{terminal_context or "(no terminal commands have run yet)"}
 
 TASK DESCRIPTION:
 {task_description}

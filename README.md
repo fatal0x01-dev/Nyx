@@ -194,9 +194,30 @@ The dashboard and orchestrator communicate through
 task-history database and the debug logs. Close the dashboard with Ctrl+C; this
 does not stop the orchestrator.
 
+### Live HTML run report
+
+Nyx also maintains a standalone HTML report at
+`data/nyx_report.html`. Open that file in a browser while a run is active; it
+refreshes automatically and shows the overall goal outcome, objective counts,
+each task's status and result, and captured terminal evidence. The report is
+updated throughout execution and remains available after Nyx exits. Run
+`python reset_tasks.py` to clear task history, reset the control dashboard, and
+restore the HTML report to its idle state.
+
 ## Safety and expectations
 
-Nyx is not a protected sandboxed agent. It can run commands in your active terminal, and it makes real changes to the environment if the task requires it. That is the intended design.
+Nyx refuses recognized partition-table edits, filesystem formatting, raw-device
+writes, and recursive deletion of system directories. If it encounters an
+unsafe disk confirmation such as `Ignore/Cancel?`, it sends Ctrl+C rather than
+choosing an option; if it cannot confirm the shell recovered, it stops the
+orchestrator so no further commands are sent.
+Any command refused by the high-risk-operation gate also ends the run without
+automatic retries or alternate-command attempts.
+
+These checks are defense-in-depth, not a security sandbox: arbitrary shell
+commands and scripts can still make system changes. Review Nyx's goal and
+suggestions, monitor its terminal, and do not delegate operations that must be
+guaranteed harmless.
 
 Use it for tasks you are comfortable delegating to a local shell agent. It is not a general-purpose, permissioned cloud automation platform.
 

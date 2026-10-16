@@ -18,6 +18,19 @@ CREDENTIAL_PATTERNS = [
     re.compile(r"(?:username|login|user name)\s*[:?]", re.IGNORECASE),
 ]
 
+UNSAFE_CONFIRMATION_PATTERNS = [
+    re.compile(
+        r"(?:\(\s*i\s*\)gnore|ignore)\s*/\s*(?:\(\s*c\s*\)ancel|cancel)\s*\??",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:\(\s*f\s*\)ix|fix|repair)\s*/\s*(?:\(\s*i\s*\)gnore|ignore)\s*\??",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b(?:write|apply)\s+changes?\s*\??", re.IGNORECASE),
+    re.compile(r"\bproceed\s+with\s+(?:writing|modifying|formatting)\b", re.IGNORECASE),
+]
+
 
 def detect_human_input_need(output: str) -> dict[str, Any] | None:
     """Return a structured human-input request if terminal output is waiting for input."""
@@ -27,6 +40,14 @@ def detect_human_input_need(output: str) -> dict[str, Any] | None:
     cleaned = output.strip()
     if not cleaned:
         return None
+
+    for pattern in UNSAFE_CONFIRMATION_PATTERNS:
+        if pattern.search(cleaned):
+            return {
+                "kind": "unsafe_confirmation",
+                "prompt": cleaned[:240],
+                "field": "confirmation",
+            }
 
     for pattern in APPROVAL_PATTERNS:
         if pattern.search(cleaned):

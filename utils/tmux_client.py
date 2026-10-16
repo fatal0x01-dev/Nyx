@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import time
@@ -225,6 +226,35 @@ class TmuxClient:
             or "press q to quit" in lower_output
         )
 
+    def _interrupt_and_collect(
+        self,
+        target: str,
+        start_marker: str,
+        sentinel: str,
+        partial_output: str,
+        poll_interval: float,
+    ) -> tuple[str, int | None, bool]:
+        """Cancel an interactive command and wait briefly for the shell wrapper."""
+        try:
+            self.send_raw_keys(target, "C-c", enter=False)
+        except TmuxError:
+            return partial_output, None, True
+        cleanup_deadline = time.monotonic() + 3
+        while time.monotonic() < cleanup_deadline:
+            time.sleep(min(poll_interval or 0.1, 0.1))
+            lines = self.capture_screen(target).splitlines()
+            command_result = self._command_result(lines, start_marker, sentinel)
+            if command_result is not None:
+                output, exit_code = command_result
+                return output or partial_output, exit_code, False
+            start_index = next(
+                (i for i, line in enumerate(lines) if start_marker in line),
+                -1,
+            )
+            if start_index >= 0:
+                partial_output = "\n".join(lines[start_index + 1:]).strip()
+        return partial_output, None, True
+
     # ── Driving the session ──────────────────────────────────────────
 
     def run_command(
@@ -245,9 +275,11 @@ class TmuxClient:
         start_marker = f"__NYX_START_{token}__"
         sentinel = f"__NYX_DONE_{token}__"
 
+        # Submit one shell line so a foreground interactive program cannot
+        # consume the completion wrapper as answers to its own prompts.
         wrapped = (
-            f"printf '\\n%s\\n' '{start_marker}';\n"
-            f"{command}\n"
+            f"printf '\\n%s\\n' '{start_marker}'; "
+            f"eval {shlex.quote(command)}; "
             f"__nyx_status_{token}=$?; "
             f"printf '\\n%s_%s\\n' '{sentinel}' \"$__nyx_status_{token}\""
         )
@@ -267,6 +299,26 @@ class TmuxClient:
 
             input_need = detect_human_input_need(current_output)
             if input_need is not None:
+                if input_need["kind"] == "unsafe_confirmation":
+                    canceled_output, canceled_exit_code, still_running = (
+                        self._interrupt_and_collect(
+                            target,
+                            start_marker,
+                            sentinel,
+                            current_output,
+                            poll_interval,
+                        )
+                    )
+                    return {
+                        "output": (
+                            f"{canceled_output}\nNyx canceled an unsafe interactive confirmation."
+                        ).strip(),
+                        "exit_code": canceled_exit_code,
+                        "timed_out": still_running,
+                        "human_input_needed": False,
+                        "safety_interrupted": True,
+                        "safety_halt": still_running,
+                    }
                 return {
                     "output": current_output,
                     "exit_code": None,
@@ -286,6 +338,19 @@ class TmuxClient:
                 timed_out = False
                 new_text, exit_code = command_result
                 break
+
+        if timed_out:
+            lines = self.capture_screen(target).splitlines()
+            start_index = next((i for i, line in enumerate(lines) if start_marker in line), -1)
+            end_index = next((i for i, line in enumerate(lines) if sentinel in line), len(lines))
+            new_text = "\n".join(lines[start_index + 1:end_index]).strip() if start_index >= 0 else ""
+            new_text, exit_code, _ = self._interrupt_and_collect(
+                target,
+                start_marker,
+                sentinel,
+                new_text,
+                poll_interval,
+            )
 
         return {
             "output": new_text,
