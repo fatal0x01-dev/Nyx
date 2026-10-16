@@ -438,6 +438,114 @@ def test_tmux_exits_detected_pager_and_collects_command_result(monkeypatch):
     assert ["send-keys", "-t", "nyx:0.0", "q"] in commands
 
 
+def test_tmux_accepts_command_not_found_package_install_prompt_once(monkeypatch):
+    client = TmuxClient()
+    commands = []
+    markers = {}
+    capture_count = 0
+
+    def fake_run(args):
+        commands.append(args)
+        if (
+            args[0] == "send-keys"
+            and "Enter" in args
+            and "__NYX_START_" in args[3]
+        ):
+            wrapped_command = args[3]
+            markers["start"] = re.search(
+                r"__NYX_START_[a-f0-9]+__", wrapped_command
+            ).group(0)
+            markers["done"] = re.search(
+                r"__NYX_DONE_[a-f0-9]+__", wrapped_command
+            ).group(0)
+        return ""
+
+    def fake_capture_screen(target):
+        nonlocal capture_count
+        capture_count += 1
+        prompt = (
+            "Command 'docker-compose' not found, but can be installed with:\n"
+            "sudo apt install docker-compose\n"
+            "Do you want to install it? (N/y)"
+        )
+        if capture_count < 3:
+            return f"{markers['start']}\n{prompt}"
+        return f"{markers['start']}\ninstalled\n{markers['done']}_0"
+
+    monkeypatch.setattr(client, "_run", fake_run)
+    monkeypatch.setattr(client, "capture_screen", fake_capture_screen)
+    monkeypatch.setattr("utils.tmux_client.time.sleep", lambda _: None)
+
+    result = client.run_command("nyx:0.0", "docker-compose init", poll_interval=0)
+
+    assert result["output"] == "installed"
+    assert result["exit_code"] == 0
+    assert [
+        command[3]
+        for command in commands
+        if command[0] == "send-keys" and command[3] == "y"
+    ] == ["y"]
+
+
+def test_tmux_reports_waiting_password_prompt(monkeypatch):
+    client = TmuxClient()
+    markers = {}
+
+    def fake_run(args):
+        if args[0] == "send-keys" and "__NYX_START_" in args[3]:
+            markers["start"] = re.search(
+                r"__NYX_START_[a-f0-9]+__", args[3]
+            ).group(0)
+            markers["done"] = re.search(
+                r"__NYX_DONE_[a-f0-9]+__", args[3]
+            ).group(0)
+        return ""
+
+    monkeypatch.setattr(client, "_run", fake_run)
+    monkeypatch.setattr(
+        client,
+        "capture_screen",
+        lambda target: f"{markers['start']}\n[sudo] password for kali:",
+    )
+    monkeypatch.setattr("utils.tmux_client.time.sleep", lambda _: None)
+
+    result = client.run_command("nyx:0.0", "sudo apt install docker-compose")
+
+    assert result["human_input_needed"] is True
+    assert result["human_input_kind"] == "credential"
+
+
+def test_tmux_does_not_treat_completed_password_error_as_waiting_prompt(monkeypatch):
+    client = TmuxClient()
+    markers = {}
+
+    def fake_run(args):
+        if args[0] == "send-keys" and "__NYX_START_" in args[3]:
+            markers["start"] = re.search(
+                r"__NYX_START_[a-f0-9]+__", args[3]
+            ).group(0)
+            markers["done"] = re.search(
+                r"__NYX_DONE_[a-f0-9]+__", args[3]
+            ).group(0)
+        return ""
+
+    monkeypatch.setattr(client, "_run", fake_run)
+    monkeypatch.setattr(
+        client,
+        "capture_screen",
+        lambda target: (
+            f"{markers['start']}\nsudo: a password is required\n{markers['done']}_1"
+        ),
+    )
+    monkeypatch.setattr("utils.tmux_client.time.sleep", lambda _: None)
+
+    result = client.run_command("nyx:0.0", "sudo -n apt install docker-compose")
+
+    assert result["human_input_needed"] is False
+    assert result["exit_code"] == 1
+    assert "sudo: a password is required" in result["output"]
+
+
 def test_tmux_interrupts_timed_out_command_and_waits_for_sentinel(monkeypatch):
     client = TmuxClient()
     commands = []
@@ -880,6 +988,92 @@ def test_model_requested_credential_is_not_typed_into_terminal(monkeypatch):
 
     assert result["status"] == "failed"
     assert "will not type model-requested credentials" in result["error"]
+
+
+def test_terminal_password_prompt_requires_approval_before_credential(monkeypatch):
+    class FakeTmux:
+        def __init__(self):
+            self.sent_keys = []
+
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+        @staticmethod
+        def run_command(target, command, timeout, **kwargs):
+            return {
+                "output": "[sudo] password for kali:",
+                "exit_code": None,
+                "timed_out": False,
+                "human_input_needed": True,
+            }
+
+        def send_raw_keys(self, target, keys, **kwargs):
+            self.sent_keys.append((target, keys, kwargs))
+
+    tmux = FakeTmux()
+    executor = _make_executor_for_actions(
+        [
+            {"action": "run_command", "command": "sudo apt install docker-compose"},
+            {"action": "done", "status": "completed", "result": "Installed docker-compose."},
+        ],
+        tmux,
+    )
+    responses = iter(["yes", "secret"])
+    prompts = []
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+    monkeypatch.setattr(
+        "executor.executor.request_human_input",
+        lambda kind, prompt: prompts.append((kind, prompt)) or next(responses),
+    )
+
+    result = executor.execute(Task(id="install-compose", description="Install docker-compose"))
+
+    assert result["status"] == "completed"
+    assert [kind for kind, _ in prompts] == ["approval", "credential"]
+    assert "Approve continuing with the privileged operation?" in prompts[0][1]
+    assert tmux.sent_keys == [("nyx:0.0", "secret", {})]
+
+
+def test_denied_privileged_command_is_canceled_without_requesting_password(monkeypatch):
+    class FakeTmux:
+        def __init__(self):
+            self.sent_keys = []
+
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+        @staticmethod
+        def run_command(target, command, timeout, **kwargs):
+            return {
+                "output": "[sudo] password for kali:",
+                "exit_code": None,
+                "timed_out": False,
+                "human_input_needed": True,
+            }
+
+        def send_raw_keys(self, target, keys, **kwargs):
+            self.sent_keys.append((target, keys, kwargs))
+
+    tmux = FakeTmux()
+    executor = _make_executor_for_actions(
+        [{"action": "run_command", "command": "sudo apt install docker-compose"}],
+        tmux,
+    )
+    prompts = []
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+    monkeypatch.setattr(
+        "executor.executor.request_human_input",
+        lambda kind, prompt: prompts.append(kind) or "no",
+    )
+
+    result = executor.execute(Task(id="install-denied", description="Install docker-compose"))
+
+    assert result["status"] == "failed"
+    assert "did not approve" in result["error"]
+    assert prompts == ["approval"]
+    assert tmux.sent_keys == [("nyx:0.0", "C-c", {"enter": False})]
 
 
 def test_orchestrator_stops_run_after_high_risk_command_is_blocked(tmp_path, monkeypatch):

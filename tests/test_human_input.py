@@ -17,6 +17,17 @@ def test_detects_credential_prompt():
     assert "password" in result["prompt"].lower()
 
 
+def test_detects_command_not_found_package_install_prompt():
+    text = (
+        "Command 'docker-compose' not found, but can be installed with:\n"
+        "sudo apt install docker-compose\n"
+        "Do you want to install it? (N/y)"
+    )
+    result = detect_human_input_need(text)
+    assert result is not None
+    assert result["kind"] == "package_install_confirmation"
+
+
 def test_detects_unsafe_ignore_cancel_prompt():
     for prompt in (
         "Error: Can't have a partition outside the disk!\nIgnore/Cancel?",

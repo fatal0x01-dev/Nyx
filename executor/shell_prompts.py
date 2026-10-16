@@ -34,6 +34,10 @@ The user's response to human_input is authorization for your next decision,
 not terminal input. Nyx never types model-requested human_input responses
 into the shell. If the terminal itself is waiting for input, use the
 human_input_needed evidence returned from the command instead.
+Nyx automatically accepts the specific command-not-found offer to install a
+missing package with apt when it displays "Do you want to install it? (N/y)".
+If that installation reaches a password prompt, Nyx asks the user to approve
+the privileged operation before requesting and entering a password.
 
 To finish:
 {"action": "done", "status": "completed", "result": "<what was accomplished>"}

@@ -12,8 +12,15 @@ APPROVAL_PATTERNS = [
     re.compile(r"confirm.*(?:y/n|yes/no)", re.IGNORECASE),
 ]
 
+PACKAGE_INSTALL_PATTERN = re.compile(
+    r"can be installed with:\s*[\s\S]*?\bapt(?:-get)?\s+install\b"
+    r"[\s\S]*?do you want to install it\?\s*\(\s*n\s*/\s*y\s*\)",
+    re.IGNORECASE,
+)
+
 CREDENTIAL_PATTERNS = [
     re.compile(r"(?:password|passphrase|secret)\s*(?:required|for|to|:)", re.IGNORECASE),
+    re.compile(r"(?:password|passphrase|secret)\s+is\s+required", re.IGNORECASE),
     re.compile(r"enter .*?(?:password|passphrase|secret)", re.IGNORECASE),
     re.compile(r"(?:username|login|user name)\s*[:?]", re.IGNORECASE),
 ]
@@ -48,6 +55,13 @@ def detect_human_input_need(output: str) -> dict[str, Any] | None:
                 "prompt": cleaned[:240],
                 "field": "confirmation",
             }
+
+    if PACKAGE_INSTALL_PATTERN.search(cleaned):
+        return {
+            "kind": "package_install_confirmation",
+            "prompt": cleaned[-240:],
+            "field": "package_install",
+        }
 
     for pattern in APPROVAL_PATTERNS:
         if pattern.search(cleaned):

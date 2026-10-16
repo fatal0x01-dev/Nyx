@@ -297,6 +297,7 @@ class TmuxClient:
         timed_out = True
         new_text = ""
         pager_dismissed = False
+        install_confirmation_sent = False
 
         while time.time() < deadline:
             time.sleep(poll_interval)
@@ -311,6 +312,12 @@ class TmuxClient:
                 default=-1,
             )
             current_output = "\n".join(lines[start_index + 1:]) if start_index >= 0 else ""
+
+            command_result = self._command_result(lines, start_marker, sentinel)
+            if command_result is not None:
+                timed_out = False
+                new_text, exit_code = command_result
+                break
 
             input_need = detect_human_input_need(current_output)
             if input_need is not None:
@@ -334,6 +341,11 @@ class TmuxClient:
                         "safety_interrupted": True,
                         "safety_halt": still_running,
                     }
+                if input_need["kind"] == "package_install_confirmation":
+                    if not install_confirmation_sent:
+                        self.send_raw_keys(target, "y")
+                        install_confirmation_sent = True
+                    continue
                 return {
                     "output": current_output,
                     "exit_code": None,
@@ -347,12 +359,6 @@ class TmuxClient:
                 self.send_raw_keys(target, "q", enter=False)
                 pager_dismissed = True
                 continue
-
-            command_result = self._command_result(lines, start_marker, sentinel)
-            if command_result is not None:
-                timed_out = False
-                new_text, exit_code = command_result
-                break
 
         if timed_out:
             screen = (

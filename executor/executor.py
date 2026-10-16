@@ -1049,7 +1049,64 @@ class Executor:
                     input_info = detect_human_input_need(result.get("output", ""))
                     if input_info is not None:
                         log.warning("Task %s: command is waiting for %s input in tmux pane", task.id, input_info["kind"])
-                        human_response = request_human_input(input_info["kind"], input_info["prompt"])
+                        is_password_prompt = re.search(
+                            r"\b(?:password|passphrase|secret)\b",
+                            input_info["prompt"],
+                            re.IGNORECASE,
+                        )
+                        if input_info["kind"] == "credential" and is_password_prompt:
+                            approval_prompt = (
+                                "This command requires elevated privileges and is waiting "
+                                f"for a password: {input_info['prompt']}. "
+                                "Approve continuing with the privileged operation?"
+                            )
+                            approval = request_human_input("approval", approval_prompt)
+                            if approval.strip().casefold() not in {
+                                "y",
+                                "yes",
+                                "approve",
+                                "approved",
+                            }:
+                                try:
+                                    self._tmux.send_raw_keys(target, "C-c", enter=False)
+                                except TmuxError as e:
+                                    log.error(
+                                        "Task %s: could not cancel after privilege was denied: %s",
+                                        task.id,
+                                        e,
+                                    )
+                                    return {
+                                        "status": "failed",
+                                        "result": "",
+                                        "error": (
+                                            "Privilege was denied, and the waiting command "
+                                            f"could not be canceled: {e}"
+                                        ),
+                                        "safety_halt": True,
+                                    }
+                                step_log.append({
+                                    "command": command,
+                                    "output": "User denied the privileged operation; command canceled.",
+                                    "exit_code": 130,
+                                    "timed_out": False,
+                                    "safety_blocked": True,
+                                })
+                                self._last_step_log = list(step_log)
+                                return {
+                                    "status": "failed",
+                                    "result": "",
+                                    "error": "The user did not approve the privileged operation.",
+                                    "safety_blocked": True,
+                                }
+                            human_response = request_human_input(
+                                "credential",
+                                input_info["prompt"],
+                            )
+                        else:
+                            human_response = request_human_input(
+                                input_info["kind"],
+                                input_info["prompt"],
+                            )
                         try:
                             self._tmux.send_raw_keys(target, human_response)
                         except TmuxError as e:
