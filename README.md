@@ -35,11 +35,14 @@ Nyx will:
 
 ## Docker setup
 
-For Docker setup goals, Nyx prefers a goal-matched `docker run` command rather
-than creating a Compose project. It uses Docker Compose only when the goal
-explicitly requests Compose or a Compose file. If a Dockerfile, Compose file,
-or other Docker configuration file is explicitly required, Nyx creates or
-updates it through the verified `read_file`/`write_file` workflow.
+For Docker application/service setup goals, Nyx creates the requested project
+files and a Dockerfile through the verified `read_file`/`write_file` workflow,
+builds a named local image, runs a named container, and verifies that
+container. A request to run an existing image can use `docker run` directly.
+Nyx uses Docker Compose only when explicitly requested. On a published-port
+conflict, it retries with a different host port instead of changing host
+Apache or other host services. Container cleanup targets only the named
+container selected from `docker ps -a`; Nyx will not stop every container.
 
 ## Core design
 

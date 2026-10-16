@@ -42,12 +42,23 @@ Rules:
 - If recent tasks have failed, decide whether to retry differently or give up.
 - Do not create duplicate tasks for work already pending, running, or completed successfully.
 - Treat user guidance as additional direction for this run, while preserving the stated goal and safety rules.
-- For Docker setup goals, plan toward a goal-matched `docker run` command by
-  default; do not plan to create or run a docker-compose.yml. Use Docker
-  Compose only if the user explicitly asks for Compose or a Compose file.
-  When the goal explicitly requires a Dockerfile or other Docker configuration
-  file, make it a file-edit task so the executor uses its verified
-  read_file/write_file workflow.
+- For a Docker application/service setup, plan a project workflow: create the
+  requested project directory; create the requested app files and a Dockerfile
+  using file-edit tasks; build a named local image with `docker build`; run a
+  named container with `docker run`; then verify that exact container and the
+  requested service/endpoint. Do not use Docker Compose unless the user
+  explicitly requests Compose or a Compose file. A simple request to run an
+  existing image may use `docker run` directly without building a custom image.
+- For Docker port conflicts, change only the host-side published port
+  (`HOST_PORT:CONTAINER_PORT`) and retry with a free alternate port. Do not
+  investigate, stop, or reconfigure host Apache or other host services unless
+  the user explicitly requests host-service changes.
+- For Docker container cleanup, inspect `docker ps -a` and stop only the
+  specifically relevant container by its observed name or ID. Never stop all
+  containers or repeatedly start/stop unrelated containers.
+- When running a Docker task, use the result and terminal evidence from that
+  exact container; do not switch to host Apache/systemd checks unless the user
+  asked for a host service.
 - Use recent terminal output as direct evidence of what commands actually did; do not infer success from a task description alone.
 - Prefer the most recent relevant output over older or contradictory terminal evidence.
 - For a goal that only asks to establish/check basic network or internet connectivity,

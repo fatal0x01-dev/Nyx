@@ -110,10 +110,26 @@ class Planner:
         )
         raw = self._call_lmstudio_for_validation(user_prompt)
         result_json = parse_json_response(raw)
+        if result_json is None or result_json.get("action") not in {"accepted", "rejected"}:
+            log.warning(
+                "Planner validation returned an invalid response; requesting one strict-format retry."
+            )
+            raw = self._call_lmstudio_for_validation(
+                user_prompt
+                + "\nYour previous response was invalid. Return ONLY one JSON object "
+                'with action exactly "accepted" or "rejected".'
+            )
+            result_json = parse_json_response(raw)
         if result_json is None:
-            return {"action": "rejected", "reason": f"Planner validation returned non-JSON output: {raw[:200]}"}
+            return {
+                "action": "rejected",
+                "reason": f"Planner validation returned non-JSON output after retry: {raw[:200]}",
+            }
         if result_json.get("action") not in {"accepted", "rejected"}:
-            return {"action": "rejected", "reason": "Planner validation returned an invalid action."}
+            return {
+                "action": "rejected",
+                "reason": "Planner validation returned an invalid action after retry.",
+            }
         return result_json
 
     # ── LM Studio client ──────────────────────────────────────────────────

@@ -19,7 +19,8 @@ from utils.ssh import SSHConfig, build_ssh_command
 from utils.tmux_client import TmuxError
 from utils.control_plane import ControlPlane
 from executor.shell_prompts import build_step_prompt
-from planner.prompts import build_plan_prompt
+from planner.prompts import SYSTEM_PROMPT as PLANNER_SYSTEM_PROMPT, build_plan_prompt
+from planner.planner import Planner
 
 
 def test_marks_completed_only_when_current_task_evidence_is_confident():
@@ -346,8 +347,9 @@ def test_docker_setup_prompt_prefers_docker_run_unless_compose_was_requested():
         ),
     )
 
-    assert "THIS IS A DOCKER SETUP TASK" in prompt
-    assert "single goal-matched `docker run` command" in prompt
+    assert "THIS IS A DOCKER TASK" in prompt
+    assert "build a named local image with `docker build`" in prompt
+    assert "run a named container with `docker run`" in prompt
     assert Executor._is_docker_setup_task(
         "Configure an Apache Docker container and expose port 8080"
     )
@@ -358,6 +360,18 @@ def test_docker_setup_prompt_prefers_docker_run_unless_compose_was_requested():
         "Create a docker-compose.yml for Apache"
     )
     assert Executor._requires_file_write("Create a Dockerfile for Apache")
+
+    planner_prompt = build_plan_prompt(
+        "set up a Docker Apache website in ~/web-server",
+        "No completed tasks.",
+        [],
+    )
+    assert "set up a Docker Apache website" in planner_prompt
+    assert "Dockerfile" in PLANNER_SYSTEM_PROMPT
+    assert "`docker build`" in PLANNER_SYSTEM_PROMPT
+    assert "alternate port" in PLANNER_SYSTEM_PROMPT
+    assert "Do not" in PLANNER_SYSTEM_PROMPT
+    assert "host Apache" in PLANNER_SYSTEM_PROMPT
 
     compose_prompt = build_step_prompt(
         task_id="compose-apache",
@@ -383,9 +397,17 @@ def test_docker_compose_invocation_is_distinguished_and_compose_file_edits_are_d
     assert not Executor._is_compose_file_write_command(
         "cat > Dockerfile <<'EOF'\nFROM httpd\nEOF"
     )
+    assert Executor._is_docker_setup_task("Build the Docker image for Apache")
+    assert Executor._is_host_apache_command("systemctl status apache2")
+    assert not Executor._is_host_apache_command("docker exec web apache2ctl -k graceful")
+    assert Executor._is_bulk_docker_stop_command("docker stop $(docker ps -q)")
+    assert not Executor._is_bulk_docker_stop_command("docker stop web-server")
+    assert Executor._docker_port_conflict(
+        "Error response from daemon: port is already allocated"
+    )
 
 
-def test_docker_setup_rejects_compose_and_continues_with_docker_run(monkeypatch):
+def test_docker_setup_rejects_compose_and_host_apache_checks(monkeypatch):
     class FakeTmux:
         def __init__(self):
             self.commands = []
@@ -406,7 +428,9 @@ def test_docker_setup_rejects_compose_and_continues_with_docker_run(monkeypatch)
     executor = _make_executor_for_actions(
         [
             {"action": "run_command", "command": "docker compose up -d"},
-            {"action": "run_command", "command": "docker run -d -p 8080:80 httpd"},
+            {"action": "run_command", "command": "systemctl status apache2"},
+            {"action": "run_command", "command": "netstat -tuln | grep :80"},
+            {"action": "run_command", "command": "docker build -t web-server ."},
             {"action": "done", "status": "completed", "result": "Apache container started."},
         ],
         tmux,
@@ -421,8 +445,124 @@ def test_docker_setup_rejects_compose_and_continues_with_docker_run(monkeypatch)
     )
 
     assert result["status"] == "completed"
-    assert tmux.commands == ["docker run -d -p 8080:80 httpd"]
+    assert tmux.commands == ["docker build -t web-server ."]
     assert executor._last_step_log[0]["policy_blocked"] is True
+    assert executor._last_step_log[1]["policy_blocked"] is True
+    assert executor._last_step_log[2]["policy_blocked"] is True
+
+
+def test_docker_port_conflict_guides_retry_on_an_alternate_host_port(monkeypatch):
+    class FakeTmux:
+        def __init__(self):
+            self.commands = []
+
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+        def run_command(self, target, command, timeout, **kwargs):
+            self.commands.append(command)
+            output = (
+                "Error response from daemon: port is already allocated"
+                if len(self.commands) == 1
+                else "container web-server started"
+            )
+            return {
+                "output": output,
+                "exit_code": 1 if len(self.commands) == 1 else 0,
+                "timed_out": False,
+            }
+
+    tmux = FakeTmux()
+    executor = _make_executor_for_actions(
+        [
+            {"action": "run_command", "command": "docker run -d -p 80:80 --name web-server web-image"},
+            {"action": "run_command", "command": "docker run -d -p 8080:80 --name web-server web-image"},
+            {"action": "done", "status": "completed", "result": "Container web-server started on port 8080."},
+        ],
+        tmux,
+    )
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+
+    result = executor.execute(
+        Task(
+            id="web-server-container",
+            description="Run the Docker web-server container on a free host port",
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert tmux.commands == [
+        "docker run -d -p 80:80 --name web-server web-image",
+        "docker run -d -p 8080:80 --name web-server web-image",
+    ]
+    assert "different free HOST_PORT" in executor._last_step_log[0]["output"]
+
+
+def test_docker_setup_blocks_stopping_all_containers(monkeypatch):
+    class FakeTmux:
+        def __init__(self):
+            self.commands = []
+
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+        def run_command(self, target, command, timeout, **kwargs):
+            self.commands.append(command)
+            return {
+                "output": "web-server",
+                "exit_code": 0,
+                "timed_out": False,
+            }
+
+    tmux = FakeTmux()
+    executor = _make_executor_for_actions(
+        [
+            {"action": "run_command", "command": "docker stop $(docker ps -q)"},
+            {"action": "run_command", "command": "docker stop web-server"},
+            {"action": "done", "status": "completed", "result": "Stopped web-server."},
+        ],
+        tmux,
+    )
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+
+    result = executor.execute(
+        Task(id="stop-web", description="Stop the Docker container named web-server")
+    )
+
+    assert result["status"] == "completed"
+    assert tmux.commands == ["docker stop web-server"]
+    assert executor._last_step_log[0]["policy_blocked"] is True
+
+
+def test_planner_retries_validation_once_after_invalid_action(monkeypatch):
+    planner = Planner.__new__(Planner)
+    prompts = []
+    responses = iter([
+        '{"action": "Start the Docker container"}',
+        '{"action": "accepted", "summary": "The named container is running."}',
+    ])
+    monkeypatch.setattr(
+        planner,
+        "_call_lmstudio_for_validation",
+        lambda prompt: prompts.append(prompt) or next(responses),
+    )
+
+    result = planner.validate_task_result(
+        goal="Run a Docker web server",
+        task_description="Start named web-server container",
+        result="docker ps shows web-server running",
+        error="",
+        history_text="",
+    )
+
+    assert result == {
+        "action": "accepted",
+        "summary": "The named container is running.",
+    }
+    assert len(prompts) == 2
+    assert "previous response was invalid" in prompts[1]
 
 
 def test_terminal_context_is_included_in_planner_prompt():
@@ -1381,6 +1521,33 @@ def test_executor_requires_read_of_exact_path_before_file_replacement(monkeypatc
 
     assert result["status"] == "failed"
     assert "Read other.py successfully before writing it" in result["error"]
+
+
+def test_docker_setup_rejects_compose_file_write_unless_requested(monkeypatch):
+    class FakeTmux:
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+        @staticmethod
+        def run_command(*args, **kwargs):
+            pytest.fail("Compose file should be rejected before a terminal operation")
+
+    executor = _make_executor_for_actions(
+        [{"action": "write_file", "path": "docker-compose.yml", "content": "services: {}\n"}],
+        FakeTmux(),
+    )
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+
+    result = executor.execute(
+        Task(
+            id="no-compose-file",
+            description="Configure an Apache Docker container and expose port 8080",
+        )
+    )
+
+    assert result["status"] == "failed"
+    assert "did not request Docker Compose" in result["error"]
 
 
 def test_executor_rejects_shell_based_file_modification(monkeypatch):

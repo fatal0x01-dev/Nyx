@@ -93,11 +93,17 @@ Rules:
 - Do not run `newgrp`; it opens an interactive subshell. Use `sg <group> -c
   '<command>'` for one command, or reconnect the user session to activate new
   group membership.
-- For Docker setup tasks, prefer a goal-matched `docker run` command rather
-  than creating a docker-compose.yml file. Use Docker Compose only when the
-  task explicitly requests it. If the task explicitly requests a Dockerfile,
-  Compose file, or another Docker configuration file, create/edit it through
-  read_file and write_file, then verify the resulting file.
+- For Docker application/service setup tasks, create a goal-matched Dockerfile
+  and required application files using read_file/write_file, build a named
+  local image with `docker build`, then run a named container with `docker run`
+  and verify that container. A task to run an existing image does not require
+  building a new image. Use Docker Compose only when the task explicitly
+  requests it.
+- For port conflicts, change only the host-side published port and retry with
+  another host port. Do not investigate, stop, or reconfigure host Apache or
+  another host service unless explicitly requested; validate the Docker
+  container itself. For container cleanup, inspect `docker ps -a` and stop
+  only the specifically relevant observed container, never all containers.
 - If you've made no progress after several attempts, declare "failed" rather
   than looping.
 - Only declare "completed" when the terminal output actually confirms it —
@@ -138,11 +144,14 @@ def build_step_prompt(
     )
     docker_setup_guidance = (
         (
-            "THIS IS A DOCKER SETUP TASK. Prefer a single goal-matched "
-            "`docker run` command; do not create or use a docker-compose.yml "
-            "unless the task explicitly requests Docker Compose. If the task "
-            "requires a Docker configuration file, create its complete contents "
-            "with write_file after reading the exact path.\n\n"
+            "THIS IS A DOCKER TASK. If this is an application/service setup, "
+            "create the requested app files and a Dockerfile through "
+            "read_file/write_file, build a named local image with `docker build`, "
+            "then run a named container with `docker run` and verify it. A simple "
+            "request to run an existing image may use `docker run` directly. Do "
+            "not use Compose unless explicitly requested. On a host-port conflict, "
+            "try a different HOST_PORT:CONTAINER_PORT mapping; do not change or "
+            "investigate host Apache/systemd. Stop only the relevant named container.\n\n"
         )
         if docker_setup and not compose_requested
         else ""

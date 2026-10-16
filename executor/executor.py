@@ -367,6 +367,9 @@ class Executor:
                 "run ",
                 "launch",
                 "start",
+                "build",
+                "image",
+                "stop",
             )
         )
 
@@ -412,6 +415,58 @@ class Executor:
             "docker-compose.yaml",
         }
         return any(token.rsplit("/", 1)[-1].lower() in compose_files for token in tokens)
+
+    @staticmethod
+    def _is_host_apache_command(command: str) -> bool:
+        try:
+            tokens = [token.lower() for token in shlex.split(command, posix=True)]
+        except ValueError:
+            return False
+        if not tokens:
+            return False
+        command_index = 1 if tokens[0] == "sudo" and len(tokens) > 1 else 0
+        executable = tokens[command_index].rsplit("/", 1)[-1]
+        arguments = tokens[command_index + 1:]
+        if executable in {"apache2", "apachectl", "httpd"}:
+            return True
+        return executable in {"systemctl", "service"} and any(
+            argument.rsplit("/", 1)[-1] in {"apache2", "httpd"}
+            for argument in arguments
+        )
+
+    @staticmethod
+    def _is_host_port_investigation_command(command: str) -> bool:
+        try:
+            tokens = [token.lower() for token in shlex.split(command, posix=True)]
+        except ValueError:
+            return False
+        if not tokens:
+            return False
+        command_index = 1 if tokens[0] == "sudo" and len(tokens) > 1 else 0
+        executable = tokens[command_index].rsplit("/", 1)[-1]
+        return executable in {"netstat", "ss", "lsof"}
+
+    @staticmethod
+    def _is_bulk_docker_stop_command(command: str) -> bool:
+        normalized = " ".join(command.lower().split())
+        return bool(
+            re.search(
+                r"\bdocker\s+stop\s+(?:['\"]?\$?\(\s*docker\s+ps\b|`docker\s+ps\b)",
+                normalized,
+            )
+        )
+
+    @staticmethod
+    def _docker_port_conflict(output: str) -> bool:
+        text = (output or "").lower()
+        return any(
+            marker in text
+            for marker in (
+                "port is already allocated",
+                "address already in use",
+                "bind: address already in use",
+            )
+        )
 
     @staticmethod
     def _requires_file_write(task_description: str) -> bool:
@@ -739,6 +794,31 @@ class Executor:
             kind = action.get("action")
 
             if kind in {"read_file", "write_file"}:
+                path = action.get("path")
+                if not isinstance(path, str) or not path.strip():
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": f"{kind} requires a non-empty path.",
+                    }
+                path = path.strip()
+
+                if (
+                    kind == "write_file"
+                    and self._is_docker_setup_task(task.description)
+                    and not self._explicitly_requests_compose(task.description)
+                    and path.rsplit("/", 1)[-1].lower()
+                    in {"compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"}
+                ):
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": (
+                            "This Docker setup task did not request Docker Compose. "
+                            "Write a goal-matched Dockerfile with write_file instead."
+                        ),
+                    }
+
                 if not self._requires_file_write(task.description):
                     return {
                         "status": "failed",
@@ -748,15 +828,6 @@ class Executor:
                             "request creating or changing a file."
                         ),
                     }
-
-                path = action.get("path")
-                if not isinstance(path, str) or not path.strip():
-                    return {
-                        "status": "failed",
-                        "result": "",
-                        "error": f"{kind} requires a non-empty path.",
-                    }
-                path = path.strip()
 
                 if kind == "read_file":
                     try:
@@ -1043,11 +1114,57 @@ class Executor:
                 ):
                     message = (
                         "This Docker setup task did not request Docker Compose. "
-                        "Use a goal-matched `docker run` command instead. Do not "
-                        "create a Compose file for this task. If a Docker configuration "
-                        "file is explicitly required, create it through read_file/write_file."
+                        "Build a goal-matched local image from a Dockerfile, then use "
+                        "`docker run`. Do not create a Compose file for this task."
                     )
                     log.warning("Task %s: %s", task.id, message)
+                    step_log.append({
+                        "command": command,
+                        "output": message,
+                        "exit_code": None,
+                        "timed_out": False,
+                        "policy_blocked": True,
+                    })
+                    self._last_step_log = list(step_log)
+                    continue
+
+                if (
+                    self._is_docker_setup_task(task.description)
+                    and not any(
+                        term in task.description.lower()
+                        for term in ("host apache", "host service", "system apache")
+                    )
+                    and (
+                        self._is_host_apache_command(command)
+                        or self._is_host_port_investigation_command(command)
+                    )
+                ):
+                    message = (
+                        "This task is setting up a Docker container, not host web "
+                        "services. Do not investigate or change host Apache or inspect "
+                        "host listeners; use a different published host port if Docker "
+                        "reports a conflict, then verify the named container."
+                    )
+                    log.warning("Task %s: %s", task.id, message)
+                    step_log.append({
+                        "command": command,
+                        "output": message,
+                        "exit_code": None,
+                        "timed_out": False,
+                        "policy_blocked": True,
+                    })
+                    self._last_step_log = list(step_log)
+                    continue
+
+                if (
+                    self._is_docker_setup_task(task.description)
+                    and self._is_bulk_docker_stop_command(command)
+                ):
+                    message = (
+                        "Stopping every Docker container is not allowed. Inspect "
+                        "`docker ps -a` and stop only the specific relevant container "
+                        "by its observed name or ID."
+                    )
                     step_log.append({
                         "command": command,
                         "output": message,
@@ -1223,7 +1340,15 @@ class Executor:
 
                 step_log.append({
                     "command": command,
-                    "output": result["output"],
+                    "output": (
+                        f"{result['output']}\nDocker port conflict detected. "
+                        "Retry the same container with a different free HOST_PORT "
+                        "while keeping CONTAINER_PORT unchanged; do not investigate "
+                        "or modify host web-server services."
+                        if self._is_docker_setup_task(task.description)
+                        and self._docker_port_conflict(str(result.get("output", "")))
+                        else result["output"]
+                    ),
                     "exit_code": result["exit_code"],
                     "timed_out": result["timed_out"],
                 })
