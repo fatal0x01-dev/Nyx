@@ -1110,6 +1110,7 @@ class Executor:
                     "timed_out": False,
                     "file_operation": "verify",
                     "file_path": path,
+                    "verified_content": verified_content,
                 })
                 self._last_step_log = list(step_log)
                 continue

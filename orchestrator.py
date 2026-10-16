@@ -426,15 +426,30 @@ class Orchestrator:
             )
             if output:
                 lines.append(output[-1600:])
+            verified_content = step.get("verified_content")
+            if isinstance(verified_content, str):
+                lines.append("Verified file content (read back):")
+                lines.append(verified_content[:4000])
+                if len(verified_content) > 4000:
+                    lines.append("(verified content truncated for planner context)")
         return "\n".join(lines)
 
     # ── Task execution ────────────────────────────────────────────────────
 
-    def _validate_task_completion(self, task: Task, result: dict) -> bool:
-        """Ask the planner to validate whether this task result is actually sufficient."""
+    def _validate_task_completion(self, task: Task, result: dict) -> str | None:
+        """Ask the planner to validate this attempt using only its own evidence."""
         if not isinstance(result, dict):
-            return False
+            return "Executor returned an invalid task result."
 
+        step_log = getattr(self._executor, "_last_step_log", [])
+        terminal_evidence = self._format_terminal_evidence(task, step_log)
+        current_attempt = (
+            f"CURRENT TASK ATTEMPT: {task.id}\n"
+            "The executor reported this attempt as completed; its completion is "
+            "pending validation.\n"
+            f"result={result.get('result', '') or '(none)'}\n"
+            f"error={result.get('error', '') or '(none)'}"
+        )
         try:
             guidance_text = self._checkpoint("Validating task")
             validation = self._planner.validate_task_result(
@@ -442,25 +457,28 @@ class Orchestrator:
                 task_description=task.description,
                 result=result.get("result", ""),
                 error=result.get("error", ""),
-                history_text=self._history.as_prompt_text(limit=20),
+                history_text="",
                 remote_context=self._remote_context,
                 guidance_text=guidance_text,
-                terminal_context=self._terminal_context_text(),
+                terminal_context="\n\n".join(
+                    part for part in (terminal_evidence, current_attempt) if part
+                ),
             )
         except RuntimeError as e:
             log.warning("Planner validation rejected task %s because validation call failed: %s", task.id, e)
-            return False
+            return f"Planner validation call failed: {e}"
 
         if validation.get("action") == "rejected":
-            reasoning.warning("Planner rejected task %s: %s", task.id, validation.get("reason", "unknown reason"))
-            return False
+            reason = str(validation.get("reason", "unknown reason"))
+            reasoning.warning("Planner rejected task %s: %s", task.id, reason)
+            return f"Planner rejected task completion: {reason}"
 
         if validation.get("action") == "accepted":
             reasoning.info("Planner accepted task %s as complete: %s", task.id, validation.get("summary", "validated"))
-            return True
+            return None
 
         reasoning.warning("Planner validation for task %s returned an invalid action; rejecting as untrusted.", task.id)
-        return False
+        return "Planner validation returned an invalid action."
 
     def _run_task(self, task: Task):
         self._control.update_run(
@@ -514,13 +532,14 @@ class Orchestrator:
             result_text = ""
 
         if status == "completed":
-            if not self._validate_task_completion(task, result):
+            validation_error = self._validate_task_completion(task, result)
+            if validation_error is not None:
                 log.warning(
                     "Task %s was completed by the executor, but rejected by planner validation; retrying or failing the task.",
                     task.id,
                 )
                 status = "failed"
-                error_text = result_text or "Task completion was not validated by the planner."
+                error_text = validation_error
                 result_text = ""
 
         if status == "completed":

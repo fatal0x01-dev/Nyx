@@ -1903,6 +1903,7 @@ def test_executor_reads_rewrites_and_verifies_entire_multiline_file(monkeypatch)
     assert "first=old\nsecond=old\nthird=keep\n" in executor._last_step_log[0]["output"]
     assert executor._last_step_log[1]["file_operation"] == "write"
     assert "matched the complete requested file contents" in executor._last_step_log[2]["output"]
+    assert executor._last_step_log[2]["verified_content"] == updated
     assert Executor._has_write_step(executor._last_step_log)
 
 
@@ -2117,15 +2118,41 @@ def test_network_check_success_is_recognized_as_done():
 
 def test_orchestrator_requires_planner_validation_after_task_completion(monkeypatch):
     orchestrator = Orchestrator()
-    task = Task(id="t1", description="check docker-compose.yml")
+    task = Task(id="t1", description="Create an Apache Dockerfile")
     result = {"status": "completed", "result": "docker-compose config succeeded"}
+    orchestrator._recent_terminal_context = [
+        "TASK OUTCOME prior-html-task: status=failed\n"
+        "task=Create a login.html file\nerror=No HTML file was created."
+    ]
+    orchestrator._executor._last_step_log = [
+        {
+            "command": "<verify_file ~/web-server/Dockerfile>",
+            "output": "Read-back verification matched the complete requested file contents.",
+            "exit_code": 0,
+            "timed_out": False,
+            "file_operation": "verify",
+            "file_path": "~/web-server/Dockerfile",
+            "verified_content": "FROM httpd:latest\n",
+        }
+    ]
+    validation_request = {}
 
     def fake_validate_task_result(**kwargs):
+        validation_request.update(kwargs)
         return {"action": "rejected", "reason": "The task result is insufficient; no direct validation was performed."}
 
     monkeypatch.setattr(orchestrator._planner, "validate_task_result", fake_validate_task_result)
 
-    assert orchestrator._validate_task_completion(task, result) is False
+    rejection = orchestrator._validate_task_completion(task, result)
+
+    assert rejection == (
+        "Planner rejected task completion: "
+        "The task result is insufficient; no direct validation was performed."
+    )
+    assert validation_request["history_text"] == ""
+    assert "FROM httpd:latest" in validation_request["terminal_context"]
+    assert "Create a login.html file" not in validation_request["terminal_context"]
+    assert "status=failed" not in validation_request["terminal_context"]
 
 
 def test_normalizes_escaped_newline_yaml_writes():
