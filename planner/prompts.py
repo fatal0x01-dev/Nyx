@@ -41,6 +41,11 @@ Rules:
 - If any task is still pending or running, do not signal goal_complete; instead continue with create_tasks or another actionable step.
 - If recent tasks have failed, decide whether to retry differently or give up.
 - Do not create duplicate tasks for work already pending, running, or completed successfully.
+- Treat user guidance as additional direction for this run, while preserving the stated goal and safety rules.
+- For a goal that only asks to establish/check basic network or internet connectivity,
+  prefer one bounded external ping as the decisive check. Do not queue additional
+  diagnostics or service restarts after a successful reply; never restart networking
+  or alter configuration unless the goal explicitly requests repair.
 """
 
 VALIDATION_SYSTEM_PROMPT = """You are the validation layer for an autonomous task executor.
@@ -78,6 +83,8 @@ def build_plan_prompt(
     goal: str,
     history_text: str,
     pending_tasks: list[dict],
+    remote_context: str = "",
+    guidance_text: str = "",
 ) -> str:
     pending_str = (
         "\n".join(
@@ -90,6 +97,12 @@ def build_plan_prompt(
 
     return f"""GOAL:
 {goal}
+
+EXECUTION ENVIRONMENT:
+{remote_context or "Local terminal"}
+
+USER GUIDANCE FOR THIS RUN:
+{guidance_text or "(none)"}
 
 TASK HISTORY (most recent completions):
 {history_text}
@@ -107,9 +120,17 @@ def build_validation_prompt(
   result: str,
   error: str,
   history_text: str,
+  remote_context: str = "",
+  guidance_text: str = "",
 ) -> str:
   return f"""GOAL:
 {goal}
+
+EXECUTION ENVIRONMENT:
+{remote_context or "Local terminal"}
+
+USER GUIDANCE FOR THIS RUN:
+{guidance_text or "(none)"}
 
 TASK DESCRIPTION:
 {task_description}

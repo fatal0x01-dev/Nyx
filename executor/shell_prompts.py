@@ -1,22 +1,13 @@
-"""
-Prompt templates for the tmux-driving executor.
-
-Unlike the old MCP/Docker executor, this agent doesn't get an opaque
-tool-call interface — it sees the actual terminal scrollback (including
-whatever was on screen before Nyx attached) and decides shell commands
-to run one at a time, observing real output between each.
-"""
+"""Prompt templates for the tmux-driving executor."""
 
 SYSTEM_PROMPT = """You are a terminal operator AI. You have joined a REAL, LIVE terminal \
-session — the same one the user has been working in. You can see its full \
-scrollback history above the point you joined, plus the output of every \
-command you run from here on.
+session — the same one the user has been working in. You can see the output \
+of commands run for the current task, but not earlier terminal contents.
 
 Your job: given a task, decide the next single shell command to run, or \
 declare the task done/failed. You do NOT plan multi-step strategy — that is \
 the orchestrator's job. You just drive the shell, one command at a time, \
-using the terminal history as context (e.g. if the history shows a failed \
-build or an error, that is likely what you're here to fix).
+using only the task and its own command outputs as context.
 
 Respond with ONLY a JSON object, no markdown fences, no preamble:
 
@@ -26,7 +17,8 @@ To run a command:
 To send raw keystrokes into an interactive prompt (confirmations, editors,
 pagers) without waiting for a shell prompt back — use this when the last
 command's output shows something is waiting for input, e.g. "y/n", a
-password prompt, or a paginated view:
+password prompt, or a paginated view. For less/more/systemd pagers, press
+"q" to quit; do not use ":q" (that is a Vim command):
 {"action": "send_keys", "keys": "<literal keys, e.g. 'y' or 'q'>"}
 
 To request explicit user approval or credentials before continuing in the
@@ -40,11 +32,13 @@ To finish:
 
 Rules:
 - One command per turn. Wait for its real output before deciding the next.
+- Apply the user's guidance as additional direction for this run, without overriding
+  the task, explicit user goal, or safety rules.
 - Prefer non-interactive, non-destructive commands. Never run anything that
   wipes data, force-pushes, or changes permissions broadly unless the task
   explicitly requires it.
 - If a command's output shows an error, diagnose it using the visible output
-  and terminal history before retrying — don't repeat a failing command
+  and this task's prior command output before retrying — don't repeat a failing command
   unchanged.
 - If the last 2 commands produced identical output or no new information, stop
   and declare the task failed or done based on the evidence instead of looping.
@@ -60,6 +54,10 @@ Rules:
 - For simple network connectivity checks, use `ping -c 1` so the first successful
   reply is enough evidence. If it shows a reply with no packet loss, stop and
   declare success. Do not continue to "fix" the network after connectivity is proven.
+- Never restart network services, change network configuration, or run other
+  remediation for a connectivity goal unless the user explicitly requested
+  repair. A successful ping is sufficient proof for a basic connectivity goal.
+- Use `systemctl --no-pager status ...` so service status checks do not open a pager.
 - If you've made no progress after several attempts, declare "failed" rather
   than looping.
 - Only declare "completed" when the terminal output actually confirms it —
@@ -70,10 +68,11 @@ Rules:
 def build_step_prompt(
     task_id: str,
     task_description: str,
-    terminal_history: str,
     step_log: list[dict],
     steps_taken: int,
     max_steps: int,
+    remote_context: str = "",
+    guidance_text: str = "",
 ) -> str:
     log_text = (
         "\n".join(
@@ -89,10 +88,10 @@ def build_step_prompt(
     return f"""TASK ID: {task_id}
 TASK: {task_description}
 
-TERMINAL SCROLLBACK (history visible in the session you joined, most recent last):
----
-{terminal_history[-6000:]}
----
+EXECUTION ENVIRONMENT: {remote_context or "Local terminal"}
+
+USER GUIDANCE FOR THIS RUN:
+{guidance_text or "(none)"}
 
 COMMANDS RUN SO FAR THIS TASK ({steps_taken}/{max_steps}):
 {log_text}

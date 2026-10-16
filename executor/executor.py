@@ -1,11 +1,11 @@
 """
 Executor — joins a live tmux terminal session and drives it directly,
-one shell command at a time, using terminal scrollback as context.
+one shell command at a time, using only current-task command output.
 
 Replaces the old LM Studio MCP + mcp-docker integration: instead of
 handing the task to an opaque tool-use sandbox, this attaches to the
 real pane (the one you were already working in, if Nyx is launched
-from inside tmux) and reasons over actual terminal history and output.
+from inside tmux) and reasons over output from commands it runs.
 """
 
 from __future__ import annotations
@@ -21,6 +21,8 @@ from utils.human_input import detect_human_input_need, request_human_input
 from utils.lmstudio_client import LMStudioClient
 from utils.logger import get_logger, get_reasoning_logger
 from utils.tmux_client import TmuxClient, TmuxError
+from utils.ssh import SSHConfig, describe_ssh_target
+from utils.control_plane import ControlPlane
 
 log = get_logger(__name__)
 reasoning = get_reasoning_logger(__name__)
@@ -35,6 +37,10 @@ class Executor:
         )
         self._tmux = TmuxClient(session_name=cfg.TMUX_SESSION_NAME)
         self._last_step_log: list[dict] = []
+        self._ssh_target: str | None = None
+        self._remote_context: str = ""
+        self._control_plane: ControlPlane | None = None
+        self._control_run_id: str | None = None
 
         log.info(
             "Executor ready — %s model=%s (tmux-driven)",
@@ -74,6 +80,44 @@ class Executor:
             normalized["command"] = re.sub(r"\bping\s+-c\s+\d+", "ping -c 1", command, count=1)
 
         return normalized
+
+    @staticmethod
+    def _disable_systemctl_pager(command: str) -> str:
+        """Add systemctl's global no-pager option, including when invoked via sudo."""
+        return re.sub(
+            r"(?P<systemctl>(?:/[\w./-]+/)?systemctl)(?!\s+--no-pager\b)",
+            r"\g<systemctl> --no-pager",
+            command,
+            count=1,
+        )
+
+    def connect_ssh(self, config: SSHConfig) -> str:
+        """Connect through tmux and return the remote execution context."""
+        if not TmuxClient.is_installed():
+            raise TmuxError("tmux is not installed — SSH execution requires tmux")
+
+        current_target, _ = self._tmux.get_target()
+        target = self._tmux.new_window(current_target)
+        log.info("Opening SSH connection to %s in tmux window %s", config.destination, target)
+        self._tmux.start_ssh(target, config, timeout=cfg.SSH_CONNECT_TIMEOUT)
+        self._ssh_target = target
+        self._remote_context = describe_ssh_target(config)
+        reasoning.info("Connected the tmux terminal to %s.", config.destination)
+        return self._remote_context
+
+    def configure_control_plane(self, control_plane: ControlPlane, run_id: str) -> None:
+        self._control_plane = control_plane
+        self._control_run_id = run_id
+
+    def _control_checkpoint(self, task: Task, phase: str) -> str:
+        if self._control_plane is None or self._control_run_id is None:
+            return ""
+        self._control_plane.update_run(
+            self._control_run_id,
+            phase=phase,
+            current_task=task.description,
+        )
+        return self._control_plane.wait_if_paused(self._control_run_id)
 
     @staticmethod
     def _task_matches_compose_requirement(task_description: str, compose_text: str) -> bool:
@@ -141,6 +185,36 @@ class Executor:
         return "network" in text or "internet" in text or "connectivity" in text or "ping" in text
 
     @staticmethod
+    def _is_basic_connectivity_task(task_description: str) -> bool:
+        text = (task_description or "").lower()
+        if not Executor._is_network_check_task(text):
+            return False
+        additional_work_terms = (
+            "diagnos",
+            "troubleshoot",
+            "repair",
+            "fix ",
+            "configure",
+            "restart",
+            "firewall",
+            " dns",
+        )
+        return not any(term in text for term in additional_work_terms)
+
+    @staticmethod
+    def _has_successful_ping(step_log: list[dict]) -> bool:
+        return any(
+            isinstance(step, dict)
+            and re.search(
+                r"(?:^|\s)(?:sudo\s+)?(?:[\w./-]+/)?ping(?:\s|$)",
+                str(step.get("command", "")),
+                re.IGNORECASE,
+            )
+            and step.get("exit_code") == 0
+            for step in step_log
+        )
+
+    @staticmethod
     def _has_file_read_step(step_log: list[dict]) -> bool:
         for step in step_log or []:
             if not isinstance(step, dict):
@@ -155,16 +229,11 @@ class Executor:
         status: str,
         result: str,
         error: str,
-        terminal_history: str,
         last_exit_code: int | None,
         step_log: list[dict] | None = None,
         task_description: str | None = None,
     ) -> bool:
-        """Return True only when the terminal state genuinely suggests success.
-
-        Prefer task-scoped step output when available; the full scrollback can be stale
-        and contain unrelated historical failures from earlier work in the same tmux pane.
-        """
+        """Return True only when current-task evidence genuinely suggests success."""
         if status != "completed":
             return False
 
@@ -178,7 +247,7 @@ class Executor:
                 if isinstance(step, dict) and step.get("output")
             ]
         else:
-            evidence_parts = [terminal_history, result]
+            evidence_parts = [result]
 
         text = "\n".join(part for part in evidence_parts if part).strip().lower()
 
@@ -262,11 +331,14 @@ class Executor:
             log.error(msg)
             return {"status": "failed", "result": "", "error": msg}
 
-        try:
-            target, attached_to_running = self._tmux.get_target()
-        except TmuxError as e:
-            log.error("Could not resolve tmux target: %s", e)
-            return {"status": "failed", "result": "", "error": str(e)}
+        if self._ssh_target is not None:
+            target, attached_to_running = self._ssh_target, True
+        else:
+            try:
+                target, attached_to_running = self._tmux.get_target()
+            except TmuxError as e:
+                log.error("Could not resolve tmux target: %s", e)
+                return {"status": "failed", "result": "", "error": str(e)}
 
         if attached_to_running:
             log.info("Task %s: joined the currently running terminal session (%s)", task.id, target)
@@ -281,10 +353,10 @@ class Executor:
             )
             reasoning.info("Task %s: using detached tmux session '%s' to continue the task.", task.id, target)
 
-        history = self._tmux.capture_history(target, lines=cfg.TERMINAL_HISTORY_LINES)
         step_log: list[dict] = []
 
         for step in range(1, cfg.MAX_SHELL_STEPS_PER_TASK + 1):
+            self._control_checkpoint(task, f"Ready for step {step}")
             if self._needs_write_before_retry(task.description, step_log):
                 log.warning(
                     "Task %s: validation was repeated without an intervening config-file write; stopping to avoid a loop.",
@@ -315,7 +387,7 @@ class Executor:
                     "error": "Repeated same failing command without new evidence; task failed by no-progress guard.",
                 }
 
-            action = self._decide_next_action(task, history, step_log, step)
+            action = self._decide_next_action(task, step_log, step)
 
             if action is None:
                 return {
@@ -361,7 +433,6 @@ class Executor:
                     step_log.append({"command": f"<send_keys {keys!r}>", "output": str(e), "exit_code": None, "timed_out": False})
                     continue
                 # give the pane a moment, then re-capture as the "output" of this step
-                history = self._tmux.capture_history(target, lines=cfg.TERMINAL_HISTORY_LINES)
                 step_log.append({"command": f"<send_keys {keys!r}>", "output": "(keys sent)", "exit_code": None, "timed_out": False})
                 continue
 
@@ -374,7 +445,6 @@ class Executor:
                 except TmuxError as e:
                     log.error("Task %s: failed to send human answer to tmux pane: %s", task.id, e)
                     return {"status": "failed", "result": "", "error": str(e)}
-                history = self._tmux.capture_history(target, lines=cfg.TERMINAL_HISTORY_LINES)
                 step_log.append({
                     "command": f"<human_input {input_kind}>",
                     "output": f"Human responded to: {prompt}",
@@ -404,6 +474,7 @@ class Executor:
                         }
 
                 command = normalize_multiline_write_command(command)
+                command = self._disable_systemctl_pager(command)
                 log.info("Task %s: running `%s`", task.id, command)
                 try:
                     result = self._tmux.run_command(
@@ -424,7 +495,6 @@ class Executor:
                         except TmuxError as e:
                             log.error("Task %s: failed to send prompted response: %s", task.id, e)
                             return {"status": "failed", "result": "", "error": str(e)}
-                        history = self._tmux.capture_history(target, lines=cfg.TERMINAL_HISTORY_LINES)
                         step_log.append({
                             "command": command,
                             "output": f"Prompt required human {input_info['kind']} input: {input_info['prompt']}",
@@ -440,7 +510,13 @@ class Executor:
                     "timed_out": result["timed_out"],
                 })
                 self._last_step_log = list(step_log)
-                history = self._tmux.capture_history(target, lines=cfg.TERMINAL_HISTORY_LINES)
+                if (
+                    self._is_basic_connectivity_task(task.description)
+                    and self._has_successful_ping(step_log)
+                ):
+                    result_text = "Network connectivity confirmed by a successful ping."
+                    reasoning.info("Task %s: successful ping confirms basic connectivity; stopping further checks.", task.id)
+                    return {"status": "completed", "result": result_text}
                 continue
 
             log.warning("Task %s: unknown shell-agent action '%s' — skipping", task.id, kind)
@@ -461,17 +537,18 @@ class Executor:
     def _decide_next_action(
         self,
         task: Task,
-        terminal_history: str,
         step_log: list[dict],
         step: int,
     ) -> dict | None:
+        guidance = self._control_checkpoint(task, f"Waiting for AI decision ({step})")
         prompt = build_step_prompt(
             task_id=task.id,
             task_description=task.description,
-            terminal_history=terminal_history,
             step_log=step_log,
             steps_taken=len(step_log),
             max_steps=cfg.MAX_SHELL_STEPS_PER_TASK,
+            remote_context=self._remote_context,
+            guidance_text=guidance,
         )
 
         try:
@@ -485,6 +562,7 @@ class Executor:
             log.error("Executor model call failed on step %d: %s", step, e)
             return {"action": "done", "status": "failed", "error": str(e)}
 
+        self._control_checkpoint(task, f"AI decision received ({step})")
         parsed = parse_json_response(raw)
         if parsed is None or not isinstance(parsed, dict):
             log.warning("Executor step %d: unparseable response: %s", step, raw[:300])

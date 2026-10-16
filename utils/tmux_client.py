@@ -1,6 +1,6 @@
 """
-TmuxClient — drives a real tmux pane: reads scrollback history, sends
-keystrokes, and captures command output.
+TmuxClient — drives a real tmux pane: captures the visible screen, sends
+keystrokes, and captures current-command output.
 
 This is what lets Nyx "join" a terminal session instead of firing
 one-shot task prompts at a sandboxed MCP tool. Two ways to get a target:
@@ -22,13 +22,15 @@ human can type into the same pane to take back control.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import time
 import uuid
 
-from utils.human_input import detect_human_input_need
+from utils.human_input import detect_human_input_need, request_human_input
 from utils.logger import get_logger
+from utils.ssh import SSHConfig, build_ssh_command
 
 log = get_logger(__name__)
 
@@ -119,17 +121,109 @@ class TmuxClient:
         except TmuxError:
             return False
 
-    # ── Reading state ─────────────────────────────────────────────────
+    def new_window(self, target: str) -> str:
+        """Create a selected tmux window in the target pane's session."""
+        session_target = f"{target.split(':', 1)[0]}:"
+        window = self._run([
+            "new-window",
+            "-P",
+            "-F",
+            "#{session_name}:#{window_index}.#{pane_index}",
+            "-t",
+            session_target,
+        ]).strip()
+        if not window:
+            raise TmuxError(f"tmux did not return the new window target for {session_target}")
+        return window
 
-    def capture_history(self, target: str, lines: int = 4000) -> str:
-        """Full scrollback (up to `lines`) so the model sees terminal history,
-        not just the current screen."""
-        return self._run(
-            ["capture-pane", "-t", target, "-p", "-S", f"-{lines}"]
-        )
+    # ── Reading state ─────────────────────────────────────────────────
 
     def capture_screen(self, target: str) -> str:
         return self._run(["capture-pane", "-t", target, "-p"])
+
+    def start_ssh(
+        self,
+        target: str,
+        config: SSHConfig,
+        timeout: float = 60.0,
+        poll_interval: float = 0.4,
+    ) -> None:
+        """Open a persistent SSH shell in the target pane and wait for its ready marker."""
+        token = uuid.uuid4().hex
+        start_marker = f"__NYX_SSH_START_{token}__"
+        ready_marker = f"__NYX_SSH_READY_{token}__"
+        command = build_ssh_command(config, start_marker, ready_marker)
+        self._run(["send-keys", "-t", target, command, "Enter"])
+
+        deadline = time.time() + timeout
+        last_prompt = ""
+        last_output = ""
+        failure_markers = (
+            "could not resolve hostname",
+            "connection refused",
+            "connection timed out",
+            "no route to host",
+            "permission denied",
+            "host key verification failed",
+            "remote host identification has changed",
+            "ssh: not found",
+        )
+
+        while time.time() < deadline:
+            time.sleep(poll_interval)
+            lines = self.capture_screen(target).splitlines()
+            if any(line.strip() == ready_marker for line in lines):
+                return
+
+            start_index = next(
+                (index for index, line in enumerate(lines) if line.strip() == start_marker),
+                -1,
+            )
+            last_output = "\n".join(lines[start_index + 1:]) if start_index >= 0 else "\n".join(lines)
+            lower_output = last_output.lower()
+            failure = next((marker for marker in failure_markers if marker in lower_output), None)
+            if failure:
+                raise TmuxError(f"SSH connection failed: {last_output.strip()}")
+
+            input_need = detect_human_input_need(last_output)
+            if input_need is not None and input_need["prompt"] != last_prompt:
+                last_prompt = input_need["prompt"]
+                response = request_human_input(input_need["kind"], input_need["prompt"])
+                self.send_raw_keys(target, response)
+
+        message = (
+            f"SSH connection to {config.destination} did not become ready within "
+            f"{timeout:g}s. Last terminal output: {last_output.strip() or '(none)'}"
+        )
+        self.send_raw_keys(target, "C-c", enter=False)
+        raise TmuxError(message)
+
+    @staticmethod
+    def _command_result(lines: list[str], start_marker: str, sentinel: str) -> tuple[str, int | None] | None:
+        """Extract a command's visible output and exit code from the current screen."""
+        start_index = next((i for i, line in enumerate(lines) if start_marker in line), -1)
+        end_index = next((i for i, line in enumerate(lines) if sentinel in line), -1)
+        if end_index < 0:
+            return None
+
+        output_start = start_index + 1 if 0 <= start_index < end_index else 0
+        output = "\n".join(lines[output_start:end_index]).strip()
+        try:
+            exit_code = int(lines[end_index].split(f"{sentinel}_", 1)[1].strip())
+        except (IndexError, ValueError):
+            exit_code = None
+        return output, exit_code
+
+    @staticmethod
+    def _is_pager_screen(output: str) -> bool:
+        """Recognize common pager footers without treating arbitrary prompts as pagers."""
+        lower_output = output.lower()
+        return (
+            "--more--" in lower_output
+            or "(end)" in lower_output
+            or bool(re.search(r"lines\s+\d+-\d+/\d+", lower_output))
+            or "press q to quit" in lower_output
+        )
 
     # ── Driving the session ──────────────────────────────────────────
 
@@ -144,30 +238,37 @@ class TmuxClient:
         Type `command` into the pane, press Enter, and wait for it to
         finish by watching for a unique sentinel this method appends.
 
-        Returns {"output": "<new pane text since the command>",
+        Returns {"output": "<visible output from this command>",
                  "exit_code": int | None, "timed_out": bool}
         """
-        sentinel = f"__NYX_DONE_{uuid.uuid4().hex[:8]}__"
-        before = self.capture_screen(target)
-        before_line_count = len(before.splitlines())
+        token = uuid.uuid4().hex
+        start_marker = f"__NYX_START_{token}__"
+        sentinel = f"__NYX_DONE_{token}__"
 
-        wrapped = f"{command}; echo {sentinel}_$?"
+        wrapped = (
+            f"printf '\\n%s\\n' '{start_marker}';\n"
+            f"{command}\n"
+            f"__nyx_status_{token}=$?; "
+            f"printf '\\n%s_%s\\n' '{sentinel}' \"$__nyx_status_{token}\""
+        )
         self._run(["send-keys", "-t", target, wrapped, "Enter"])
 
         deadline = time.time() + timeout
         exit_code = None
         timed_out = True
         new_text = ""
+        pager_dismissed = False
 
         while time.time() < deadline:
             time.sleep(poll_interval)
-            screen = self.capture_history(target, lines=8000)
-            lines = screen.splitlines()
+            lines = self.capture_screen(target).splitlines()
+            start_index = next((i for i, line in enumerate(lines) if start_marker in line), -1)
+            current_output = "\n".join(lines[start_index + 1:]) if start_index >= 0 else ""
 
-            input_need = detect_human_input_need(screen)
+            input_need = detect_human_input_need(current_output)
             if input_need is not None:
                 return {
-                    "output": screen,
+                    "output": current_output,
                     "exit_code": None,
                     "timed_out": False,
                     "human_input_needed": True,
@@ -175,20 +276,15 @@ class TmuxClient:
                     "human_input_kind": input_need["kind"],
                 }
 
-            if any(sentinel in ln for ln in lines):
+            if not pager_dismissed and self._is_pager_screen(current_output):
+                self.send_raw_keys(target, "q", enter=False)
+                pager_dismissed = True
+                continue
+
+            command_result = self._command_result(lines, start_marker, sentinel)
+            if command_result is not None:
                 timed_out = False
-                # Everything from just after the old screen up to the sentinel
-                tail = lines[before_line_count:]
-                out_lines = []
-                for ln in tail:
-                    if sentinel in ln:
-                        try:
-                            exit_code = int(ln.split(f"{sentinel}_")[-1].strip())
-                        except ValueError:
-                            exit_code = None
-                        break
-                    out_lines.append(ln)
-                new_text = "\n".join(out_lines).strip()
+                new_text, exit_code = command_result
                 break
 
         return {

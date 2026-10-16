@@ -6,6 +6,7 @@ from typing import Any
 
 APPROVAL_PATTERNS = [
     re.compile(r"continue\??\s*(?:\[\s*y/?n\s*\]|\(\s*y/?n\s*\)|y/n|yes/no)", re.IGNORECASE),
+    re.compile(r"are you sure.*(?:yes/no|fingerprint)", re.IGNORECASE),
     re.compile(r"overwrite.*(?:y/n|yes/no)", re.IGNORECASE),
     re.compile(r"proceed.*(?:y/n|yes/no)", re.IGNORECASE),
     re.compile(r"confirm.*(?:y/n|yes/no)", re.IGNORECASE),

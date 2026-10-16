@@ -19,6 +19,7 @@ Loop:
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 import time
@@ -33,6 +34,9 @@ from planner.planner import Planner
 from executor.executor import Executor
 from utils.logger import get_logger, get_reasoning_logger
 from utils.helpers import new_id, utcnow
+from utils.ssh import SSHConfig
+from utils.tmux_client import TmuxError
+from utils.control_plane import ControlPlane
 
 log = get_logger(__name__)
 reasoning = get_reasoning_logger(__name__)
@@ -56,14 +60,20 @@ class Orchestrator:
         self._goal: str = ""
         self._iteration: int = 0
         self._start_time: float = 0.0
+        self._remote_context: str = ""
+        self._control = ControlPlane(cfg.CONTROL_DB_PATH)
+        self._run_id: str = ""
 
     # ── Entry point ───────────────────────────────────────────────────────
 
-    def run(self, goal: str):
+    def run(self, goal: str, ssh_config: SSHConfig | None = None):
         """Start the orchestration loop for a given goal."""
         self._goal = goal
         self._iteration = 0
         self._start_time = time.time()
+        self._run_id = new_id()
+        self._control.start_run(self._run_id, goal)
+        self._executor.configure_control_plane(self._control, self._run_id)
 
         log.info("=" * 60)
         log.info("ORCHESTRATOR START")
@@ -73,11 +83,32 @@ class Orchestrator:
 
         self._preflight_checks()
 
+        if ssh_config is not None:
+            try:
+                self._control.update_run(self._run_id, phase="Connecting to SSH host")
+                self._remote_context = self._executor.connect_ssh(ssh_config)
+            except TmuxError as e:
+                log.error("Could not establish requested SSH session: %s", e)
+                self._finish(success=False, message=f"SSH connection failed: {e}")
+                return
+
         try:
             self._loop()
         except KeyboardInterrupt:
+            self._control.update_run(
+                self._run_id,
+                phase="Interrupted",
+                status="interrupted",
+            )
             log.warning("Interrupted by user — state saved, resume any time.")
             sys.exit(0)
+        except Exception:
+            self._control.update_run(
+                self._run_id,
+                phase="Stopped after an unexpected error",
+                status="failed",
+            )
+            raise
 
     # ── Pre-flight ────────────────────────────────────────────────────────
 
@@ -128,7 +159,14 @@ class Orchestrator:
 
     def _loop(self):
         while self._iteration < cfg.MAX_ITERATIONS:
+            guidance_text = self._checkpoint("Preparing planning cycle")
             self._iteration += 1
+            self._control.update_run(
+                self._run_id,
+                phase="Planning",
+                iteration=self._iteration,
+                current_task="",
+            )
             log.info("-" * 50)
             log.info("Iteration %d / %d", self._iteration, cfg.MAX_ITERATIONS)
 
@@ -144,13 +182,18 @@ class Orchestrator:
                     goal=self._goal,
                     history_text=history_text,
                     pending_tasks=pending_tasks,
+                    remote_context=self._remote_context,
+                    guidance_text=guidance_text,
                 )
             except RuntimeError as e:
                 log.error("Planner error: %s", e)
                 log.info("Waiting 10s before retry...")
-                time.sleep(10)
+                for _ in range(40):
+                    self._checkpoint("Waiting to retry planning")
+                    time.sleep(0.25)
                 continue
 
+            self._checkpoint("Reviewing plan")
             action = plan.get("action")
 
             # ── Handle planner response ───────────────────────────────────
@@ -198,7 +241,24 @@ class Orchestrator:
                 continue
 
             reasoning.info("Executing task: %s", task.description)
+            self._control.update_run(
+                self._run_id,
+                phase="Executing task",
+                iteration=self._iteration,
+                current_task=task.description,
+            )
             self._run_task(task)
+            if self._connectivity_goal_satisfied(
+                self._goal,
+                getattr(self._executor, "_last_step_log", []),
+            ):
+                self._cancel_pending_tasks(
+                    "Superseded: a successful ping confirmed the requested network connectivity."
+                )
+                message = "Network connectivity was confirmed by a successful ping."
+                reasoning.info(message)
+                self._finish(success=True, message=message)
+                return
 
         # ── Iteration cap hit ─────────────────────────────────────────────
         log.error("Reached maximum iterations (%d) without completion.", cfg.MAX_ITERATIONS)
@@ -217,6 +277,51 @@ class Orchestrator:
             self._store.log_event(task.id, "cancelled", reason)
             reasoning.info("Retired stale retry task %s after planner confirmed goal completion.", task.id)
 
+    @staticmethod
+    def _connectivity_goal_satisfied(goal: str, step_log: list[dict]) -> bool:
+        """Treat a successful ping as sufficient for a basic connectivity-only goal."""
+        goal_lower = (goal or "").lower()
+        connectivity_terms = (
+            "connectivity",
+            "network connection",
+            "internet connection",
+            "internet access",
+        )
+        additional_work_terms = (
+            "diagnos",
+            "troubleshoot",
+            "repair",
+            "fix ",
+            "configure",
+            "restart",
+            "firewall",
+            " dns",
+        )
+        if not any(term in goal_lower for term in connectivity_terms):
+            return False
+        if any(term in goal_lower for term in additional_work_terms):
+            return False
+
+        return Executor._has_successful_ping(step_log)
+
+    def _cancel_pending_tasks(self, reason: str) -> None:
+        """Cancel pending tasks that are no longer needed after goal completion."""
+        for task in self._manager.queue_snapshot():
+            if task.status != TaskStatus.PENDING:
+                continue
+            self._manager.mark_cancelled(task, reason)
+            self._store.log_event(task.id, "cancelled", reason)
+            reasoning.info("Cancelled task %s: %s", task.id, reason)
+
+    def _checkpoint(self, phase: str) -> str:
+        """Pause only between model or shell operations, then return current guidance."""
+        self._control.update_run(
+            self._run_id,
+            phase=phase,
+            iteration=self._iteration,
+        )
+        return self._control.wait_if_paused(self._run_id)
+
     # ── Task execution ────────────────────────────────────────────────────
 
     def _validate_task_completion(self, task: Task, result: dict) -> bool:
@@ -225,12 +330,15 @@ class Orchestrator:
             return False
 
         try:
+            guidance_text = self._checkpoint("Validating task")
             validation = self._planner.validate_task_result(
                 goal=self._goal,
                 task_description=task.description,
                 result=result.get("result", ""),
                 error=result.get("error", ""),
                 history_text=self._history.as_prompt_text(limit=20),
+                remote_context=self._remote_context,
+                guidance_text=guidance_text,
             )
         except RuntimeError as e:
             log.warning("Planner validation rejected task %s because validation call failed: %s", task.id, e)
@@ -248,6 +356,12 @@ class Orchestrator:
         return False
 
     def _run_task(self, task: Task):
+        self._control.update_run(
+            self._run_id,
+            phase="Starting task",
+            iteration=self._iteration,
+            current_task=task.description,
+        )
         self._manager.mark_running(task)
         self._store.log_event(task.id, "started")
 
@@ -261,10 +375,6 @@ class Orchestrator:
         result_text = result.get("result", "")
         error_text = result.get("error", "")
 
-        terminal_history = self._executor._tmux.capture_history(
-            self._executor._tmux.get_target()[0],
-            lines=cfg.TERMINAL_HISTORY_LINES,
-        ) if self._executor else ""
         last_exit_code = None
         if isinstance(result, dict):
             last_exit_code = result.get("exit_code")
@@ -273,7 +383,6 @@ class Orchestrator:
             status=status,
             result=result_text,
             error=error_text,
-            terminal_history=terminal_history,
             last_exit_code=last_exit_code,
             step_log=getattr(self._executor, "_last_step_log", []),
             task_description=task.description,
@@ -348,12 +457,62 @@ class Orchestrator:
         if message:
             log.info("Message: %s", message)
         log.info("=" * 60)
+        if self._run_id:
+            self._control.update_run(
+                self._run_id,
+                phase=status.title(),
+                status="completed" if success else "failed",
+                current_task="",
+            )
+
+def parse_cli_args(argv: list[str] | None = None) -> tuple[str, SSHConfig | None]:
+    """Parse the goal and optional SSH connection parameters."""
+    parser = argparse.ArgumentParser(description="Run Nyx against a local or SSH terminal.")
+    parser.add_argument("--ssh", action="store_true", help="Connect to the IP supplied with --ip before planning.")
+    parser.add_argument("--ip", help="Required IP address for the SSH destination.")
+    parser.add_argument("--ssh-user", help=f"SSH username (default: {cfg.SSH_DEFAULT_USER})")
+    parser.add_argument("--ssh-port", type=int, help="SSH port")
+    parser.add_argument("--ssh-identity-file", help="SSH private key file")
+    parser.add_argument(
+        "--ssh-option",
+        action="append",
+        help="SSH -o option; when provided, replaces the default legacy-RSA compatibility options (repeatable)",
+    )
+    parser.add_argument("goal", nargs="*", help="High-level task goal")
+    args = parser.parse_args(argv)
+
+    supplied_ssh_options = (
+        args.ip is not None
+        or args.ssh_user is not None
+        or args.ssh_port is not None
+        or args.ssh_identity_file is not None
+        or args.ssh_option is not None
+    )
+    if supplied_ssh_options and not args.ssh:
+        parser.error("SSH connection parameters require --ssh")
+
+    ssh_config = None
+    if args.ssh:
+        if not args.ip:
+            parser.error("--ip is required when --ssh is supplied")
+        try:
+            ssh_config = SSHConfig(
+                ip=args.ip,
+                username=args.ssh_user or cfg.SSH_DEFAULT_USER,
+                port=args.ssh_port,
+                identity_file=args.ssh_identity_file,
+                options=tuple(args.ssh_option) if args.ssh_option is not None else cfg.SSH_DEFAULT_OPTIONS,
+            )
+        except ValueError as e:
+            parser.error(str(e))
+
+    return " ".join(args.goal).strip(), ssh_config
+
 
 def main():
     """CLI entry point."""
-    if len(sys.argv) > 1:
-        goal = " ".join(sys.argv[1:])
-    else:
+    goal, ssh_config = parse_cli_args()
+    if not goal:
         goal = input("Enter goal: ").strip()
 
     if not goal:
@@ -361,7 +520,7 @@ def main():
         sys.exit(1)
 
     orchestrator = Orchestrator()
-    orchestrator.run(goal)
+    orchestrator.run(goal, ssh_config=ssh_config)
 
 
 if __name__ == "__main__":

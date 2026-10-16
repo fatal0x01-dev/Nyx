@@ -1503,3 +1503,337 @@ IndexError: list index out of range
 2026-09-15 11:11:02  INFO      __main__                        GOAL COMPLETE after 2 iterations (9.6s)
 2026-09-15 11:11:02  INFO      __main__                        Message: The goal to validate internet connectivity is already in progress with the task 'validate_internet_connection' in the pending queue.
 2026-09-15 11:11:02  INFO      __main__                        ============================================================
+2026-10-16 04:10:29  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:10:29  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 04:10:29  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:10:29  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 04:10:29  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 04:10:29  INFO      __main__                        ============================================================
+2026-10-16 04:10:29  INFO      __main__                        ORCHESTRATOR START
+2026-10-16 04:10:29  INFO      __main__                        Goal: establish network connectivity
+2026-10-16 04:10:29  INFO      __main__                        ============================================================
+2026-10-16 04:10:29  INFO      __main__                        Checking executor availability...
+2026-10-16 04:10:29  WARNING   __main__                        Executor LM Studio not reachable at http://localhost:11434/v1 — make sure it's running before tasks are dispatched.
+2026-10-16 04:10:29  INFO      __main__                        Not running inside tmux — executor will drive a detached session named 'nyx'. Run `tmux attach -t nyx` to watch/join.
+2026-10-16 04:10:29  INFO      utils.tmux_client               Attaching to current running tmux pane: mywork:0.0
+2026-10-16 04:10:29  INFO      executor.executor               Opening SSH connection to kali@192.168.1.69 in tmux window mywork:1.0
+2026-10-16 04:10:35  INFO      __main__                        --------------------------------------------------
+2026-10-16 04:10:35  INFO      __main__                        Iteration 1 / 50
+2026-10-16 04:10:40  INFO      planner.planner                 Planner action: create_tasks
+2026-10-16 04:10:40  INFO      tasks.task_manager              Queued  Task(check_network_connectivity) [PENDING] priority=1 retries=0 | Ping the default gateway to check network connectivity
+2026-10-16 04:10:40  INFO      tasks.task_manager              Running Task(check_network_connectivity) [RUNNING] priority=1 retries=0 | Ping the default gateway to check network connectivity
+2026-10-16 04:10:40  INFO      executor.executor               Task check_network_connectivity: joined the currently running terminal session (mywork:1.0)
+2026-10-16 04:10:44  INFO      executor.executor               Task check_network_connectivity: running `ip route | grep default | awk '{print $3}'`
+2026-10-16 04:10:47  INFO      executor.executor               Task check_network_connectivity: running `ping -c 1 192.168.1.254`
+2026-10-16 04:10:50  WARNING   __main__                        Task check_network_connectivity was completed by the executor, but rejected by planner validation; retrying or failing the task.
+2026-10-16 04:10:50  WARNING   tasks.task_manager              Retry   Task(check_network_connectivity) [PENDING] priority=11 retries=1 | Ping the default gateway to check network connectivity (attempt 1) priority=11
+2026-10-16 04:10:50  INFO      tasks.task_manager              Cancelled Task(check_network_connectivity) [CANCELLED] priority=11 retries=1 | Ping the default gateway to check network connectivity | Superseded: a successful ping confirmed the requested network connectivity.
+2026-10-16 04:10:50  INFO      __main__                        ============================================================
+2026-10-16 04:10:50  INFO      __main__                        GOAL COMPLETE after 1 iterations (20.5s)
+2026-10-16 04:10:50  INFO      __main__                        Message: Network connectivity was confirmed by a successful ping.
+2026-10-16 04:10:50  INFO      __main__                        ============================================================
+2026-10-16 04:11:49  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:11:49  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 04:11:49  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:11:49  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 04:11:49  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 04:11:49  INFO      __main__                        ============================================================
+2026-10-16 04:11:49  INFO      __main__                        ORCHESTRATOR START
+2026-10-16 04:11:49  INFO      __main__                        Goal: harden this workstation
+2026-10-16 04:11:49  INFO      __main__                        ============================================================
+2026-10-16 04:11:49  INFO      __main__                        Checking executor availability...
+2026-10-16 04:11:49  WARNING   __main__                        Executor LM Studio not reachable at http://localhost:11434/v1 — make sure it's running before tasks are dispatched.
+2026-10-16 04:11:49  INFO      __main__                        Not running inside tmux — executor will drive a detached session named 'nyx'. Run `tmux attach -t nyx` to watch/join.
+2026-10-16 04:11:49  INFO      utils.tmux_client               Attaching to current running tmux pane: mywork:1.0
+2026-10-16 04:11:49  INFO      executor.executor               Opening SSH connection to kali@192.168.1.69 in tmux window mywork:2.0
+2026-10-16 04:11:52  INFO      __main__                        --------------------------------------------------
+2026-10-16 04:11:52  INFO      __main__                        Iteration 1 / 50
+2026-10-16 04:12:02  INFO      planner.planner                 Planner action: create_tasks
+2026-10-16 04:12:02  INFO      tasks.task_manager              Queued  Task(update_system) [PENDING] priority=1 retries=0 | Update all system packages to the latest versions
+2026-10-16 04:12:02  INFO      tasks.task_manager              Queued  Task(install_security_tools) [PENDING] priority=2 retries=0 | Install additional security tools like fail2ban, ClamAV, and OSSEC
+2026-10-16 04:12:02  INFO      tasks.task_manager              Queued  Task(configure_firewall) [PENDING] priority=3 retries=0 | Configure the firewall to allow only necessary traffic
+2026-10-16 04:12:02  INFO      tasks.task_manager              Queued  Task(secure_ssh) [PENDING] priority=4 retries=0 | Harden SSH configuration to prevent unauthorized access
+2026-10-16 04:12:02  INFO      tasks.task_manager              Queued  Task(disable_unnecessary_services) [PENDING] priority=5 retries=0 | Disable unnecessary services to reduce attack surface
+2026-10-16 04:12:02  INFO      tasks.task_manager              Queued  Task(enable_logging) [PENDING] priority=6 retries=0 | Enable detailed logging for security auditing
+2026-10-16 04:12:02  INFO      tasks.task_manager              Queued  Task(perform_security_audit) [PENDING] priority=7 retries=0 | Run a security audit to identify and fix vulnerabilities
+2026-10-16 04:12:02  INFO      tasks.task_manager              Running Task(update_system) [RUNNING] priority=1 retries=0 | Update all system packages to the latest versions
+2026-10-16 04:12:02  INFO      executor.executor               Task update_system: joined the currently running terminal session (mywork:2.0)
+2026-10-16 04:12:04  INFO      executor.executor               Task update_system: running `sudo apt update`
+2026-10-16 04:12:06  INFO      executor.executor               Task update_system: running `sudo apt upgrade -y`
+2026-10-16 04:12:08  INFO      executor.executor               Task update_system: sending raw keys: 'kali\n'
+2026-10-16 04:12:11  INFO      executor.executor               Task update_system: running `sudo apt update`
+2026-10-16 04:12:15  INFO      executor.executor               Task update_system: running `sudo apt upgrade -y`
+2026-10-16 04:12:20  INFO      executor.executor               Task update_system: shell agent signaled failed
+2026-10-16 04:12:20  WARNING   tasks.task_manager              Retry   Task(update_system) [PENDING] priority=11 retries=1 | Update all system packages to the latest versions (attempt 1) priority=11
+2026-10-16 04:12:20  INFO      __main__                        --------------------------------------------------
+2026-10-16 04:12:20  INFO      __main__                        Iteration 2 / 50
+2026-10-16 04:12:22  INFO      planner.planner                 Planner action: create_tasks
+2026-10-16 04:12:22  INFO      __main__                        Skipping duplicate planner task already pending/running: Update all system packages to the latest versions
+2026-10-16 04:12:22  INFO      tasks.task_manager              Running Task(install_security_tools) [RUNNING] priority=2 retries=0 | Install additional security tools like fail2ban, ClamAV, and OSSEC
+2026-10-16 04:12:22  INFO      executor.executor               Task install_security_tools: joined the currently running terminal session (mywork:2.0)
+2026-10-16 04:12:24  INFO      executor.executor               Task install_security_tools: running `sudo apt update`
+2026-10-16 04:12:26  INFO      executor.executor               Task install_security_tools: running `sudo apt install fail2ban clamav ossec-hids`
+2026-10-16 04:12:31  INFO      executor.executor               Task install_security_tools: shell agent signaled failed
+2026-10-16 04:12:31  WARNING   tasks.task_manager              Retry   Task(install_security_tools) [PENDING] priority=12 retries=1 | Install additional security tools like fail2ban, ClamAV, and OSSEC (attempt 1) priority=12
+2026-10-16 04:12:31  INFO      __main__                        --------------------------------------------------
+2026-10-16 04:12:31  INFO      __main__                        Iteration 3 / 50
+2026-10-16 04:12:34  INFO      planner.planner                 Planner action: create_tasks
+2026-10-16 04:12:34  INFO      __main__                        Skipping duplicate planner task already pending/running: Update all system packages to the latest versions
+2026-10-16 04:12:34  INFO      __main__                        Skipping duplicate planner task already pending/running: Install additional security tools like fail2ban, ClamAV, and OSSEC
+2026-10-16 04:12:34  INFO      tasks.task_manager              Running Task(configure_firewall) [RUNNING] priority=3 retries=0 | Configure the firewall to allow only necessary traffic
+2026-10-16 04:12:34  INFO      executor.executor               Task configure_firewall: joined the currently running terminal session (mywork:2.0)
+2026-10-16 04:12:36  INFO      executor.executor               Task configure_firewall: running `sudo ufw status verbose`
+2026-10-16 04:12:39  INFO      executor.executor               Task configure_firewall: shell agent signaled failed
+2026-10-16 04:12:39  WARNING   tasks.task_manager              Retry   Task(configure_firewall) [PENDING] priority=13 retries=1 | Configure the firewall to allow only necessary traffic (attempt 1) priority=13
+2026-10-16 04:12:39  INFO      __main__                        --------------------------------------------------
+2026-10-16 04:12:39  INFO      __main__                        Iteration 4 / 50
+2026-10-16 04:12:49  INFO      planner.planner                 Planner action: create_tasks
+2026-10-16 04:12:49  INFO      __main__                        Skipping duplicate planner task already pending/running: Update all system packages to the latest versions
+2026-10-16 04:12:49  INFO      tasks.task_manager              Queued  Task(2) [PENDING] priority=2 retries=0 | Secure SSH configuration to prevent unauthorized access
+2026-10-16 04:12:49  INFO      __main__                        Skipping duplicate planner task already pending/running: Disable unnecessary services to reduce attack surface
+2026-10-16 04:12:49  INFO      __main__                        Skipping duplicate planner task already pending/running: Enable detailed logging for security auditing
+2026-10-16 04:12:49  INFO      __main__                        Skipping duplicate planner task already pending/running: Install additional security tools like fail2ban, ClamAV, and OSSEC
+2026-10-16 04:12:49  INFO      __main__                        Skipping duplicate planner task already pending/running: Configure the firewall to allow only necessary traffic
+2026-10-16 04:12:49  INFO      __main__                        Skipping duplicate planner task already pending/running: Run a security audit to identify and fix vulnerabilities
+2026-10-16 04:12:49  INFO      tasks.task_manager              Running Task(2) [RUNNING] priority=2 retries=0 | Secure SSH configuration to prevent unauthorized access
+2026-10-16 04:12:49  INFO      executor.executor               Task 2: joined the currently running terminal session (mywork:2.0)
+2026-10-16 04:12:51  INFO      executor.executor               Task 2: running `sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak`
+2026-10-16 04:12:54  INFO      executor.executor               Task 2: running `sudo sed -i 's/^#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config`
+2026-10-16 04:12:57  INFO      executor.executor               Task 2: running `sudo systemctl --no-pager restart sshd`
+2026-10-16 04:13:01  INFO      executor.executor               Task 2: running `sudo grep -E 'PermitRootLogin no|PasswordAuthentication no' /etc/ssh/sshd_config`
+2026-10-16 04:13:05  INFO      executor.executor               Task 2: running `sudo grep -E 'PermitRootLogin no|PasswordAuthentication no' /etc/ssh/sshd_config`
+2026-10-16 04:13:09  INFO      executor.executor               Task 2: running `sudo grep -E 'PermitRootLogin no|PasswordAuthentication no' /etc/ssh/sshd_config`
+2026-10-16 04:13:12  INFO      executor.executor               Task 2: shell agent signaled completed
+2026-10-16 04:13:14  INFO      tasks.task_manager              Done    Task(2) [COMPLETED] priority=2 retries=0 | Secure SSH configuration to prevent unauthorized access
+2026-10-16 04:13:14  INFO      __main__                        --------------------------------------------------
+2026-10-16 04:13:14  INFO      __main__                        Iteration 5 / 50
+2026-10-16 04:13:23  INFO      planner.planner                 Planner action: create_tasks
+2026-10-16 04:13:23  INFO      __main__                        Skipping duplicate planner task already pending/running: Disable unnecessary services to reduce attack surface
+2026-10-16 04:13:23  INFO      __main__                        Skipping duplicate planner task already pending/running: Enable detailed logging for security auditing
+2026-10-16 04:13:23  INFO      __main__                        Skipping duplicate planner task already pending/running: Run a security audit to identify and fix vulnerabilities
+2026-10-16 04:13:23  INFO      __main__                        Skipping duplicate planner task already pending/running: Update all system packages to the latest versions
+2026-10-16 04:13:23  INFO      __main__                        Skipping duplicate planner task already pending/running: Install additional security tools like fail2ban, ClamAV, and OSSEC
+2026-10-16 04:13:23  INFO      __main__                        Skipping duplicate planner task already pending/running: Configure the firewall to allow only necessary traffic
+2026-10-16 04:13:23  INFO      tasks.task_manager              Running Task(secure_ssh) [RUNNING] priority=4 retries=0 | Harden SSH configuration to prevent unauthorized access
+2026-10-16 04:13:23  INFO      executor.executor               Task secure_ssh: joined the currently running terminal session (mywork:2.0)
+2026-10-16 04:13:25  INFO      executor.executor               Task secure_ssh: running `sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak`
+2026-10-16 04:13:28  INFO      executor.executor               Task secure_ssh: running `sudo sed -i 's/^#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config`
+2026-10-16 04:13:31  INFO      executor.executor               Task secure_ssh: running `sudo systemctl --no-pager restart sshd`
+2026-10-16 04:13:34  INFO      executor.executor               Task secure_ssh: running `sudo systemctl --no-pager status sshd`
+2026-10-16 04:13:38  INFO      executor.executor               Task secure_ssh: running `sudo sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config`
+2026-10-16 04:13:41  INFO      executor.executor               Task secure_ssh: running `sudo systemctl --no-pager restart sshd`
+2026-10-16 04:13:45  INFO      executor.executor               Task secure_ssh: running `sudo systemctl --no-pager status sshd`
+2026-10-16 04:13:49  INFO      executor.executor               Task secure_ssh: running `sudo sed -i 's/^#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config`
+2026-10-16 04:13:54  INFO      executor.executor               Task secure_ssh: running `sudo systemctl --no-pager restart sshd`
+2026-10-16 04:13:58  INFO      executor.executor               Task secure_ssh: running `sudo systemctl --no-pager status sshd`
+2026-10-16 04:14:04  INFO      executor.executor               Task secure_ssh: running `sudo sed -i 's/^#UsePAM yes/UsePAM yes/' /etc/ssh/sshd_config`
+2026-10-16 04:14:09  INFO      executor.executor               Task secure_ssh: running `sudo systemctl --no-pager restart sshd`
+2026-10-16 04:14:10  WARNING   executor.executor               Task secure_ssh: hit MAX_SHELL_STEPS_PER_TASK (12) without a done signal
+2026-10-16 04:14:10  WARNING   tasks.task_manager              Retry   Task(secure_ssh) [PENDING] priority=14 retries=1 | Harden SSH configuration to prevent unauthorized access (attempt 1) priority=14
+2026-10-16 04:14:10  INFO      __main__                        --------------------------------------------------
+2026-10-16 04:14:10  INFO      __main__                        Iteration 6 / 50
+2026-10-16 04:14:22  INFO      planner.planner                 Planner action: create_tasks
+2026-10-16 04:14:22  INFO      tasks.task_manager              Queued  Task(disable_unnecessary_services) [PENDING] priority=1 retries=0 | Identify and disable unnecessary services on the workstation to reduce the attac
+2026-10-16 04:14:22  INFO      tasks.task_manager              Queued  Task(enable_logging) [PENDING] priority=2 retries=0 | Configure the system to enable detailed logging for security auditing purposes.
+2026-10-16 04:14:22  INFO      tasks.task_manager              Queued  Task(perform_security_audit) [PENDING] priority=3 retries=0 | Run a comprehensive security audit to identify and address vulnerabilities on th
+2026-10-16 04:14:22  INFO      tasks.task_manager              Queued  Task(update_system) [PENDING] priority=4 retries=0 | Update all system packages to their latest versions to patch known vulnerabiliti
+2026-10-16 04:14:22  INFO      tasks.task_manager              Queued  Task(install_security_tools) [PENDING] priority=5 retries=0 | Install additional security tools such as fail2ban, ClamAV, and OSSEC to enhance
+2026-10-16 04:14:22  INFO      tasks.task_manager              Queued  Task(configure_firewall) [PENDING] priority=6 retries=0 | Configure the firewall to allow only necessary traffic and block all other incom
+2026-10-16 04:14:22  INFO      tasks.task_manager              Queued  Task(secure_ssh) [PENDING] priority=7 retries=0 | Ensure SSH configuration is hardened to prevent unauthorized access, including d
+2026-10-16 04:14:22  INFO      tasks.task_manager              Running Task(disable_unnecessary_services) [RUNNING] priority=1 retries=0 | Identify and disable unnecessary services on the workstation to reduce the attac
+2026-10-16 04:14:22  INFO      executor.executor               Task disable_unnecessary_services: joined the currently running terminal session (mywork:2.0)
+2026-10-16 04:14:24  INFO      executor.executor               Task disable_unnecessary_services: running `systemctl --no-pager list-units --type=service --state=running`
+2026-10-16 04:14:27  INFO      executor.executor               Task disable_unnecessary_services: running `systemctl --no-pager list-units --type=service --state=enabled`
+2026-10-16 04:14:31  INFO      executor.executor               Task disable_unnecessary_services: running `systemctl --no-pager list-units --type=service --state=enabled`
+2026-10-16 04:14:34  INFO      executor.executor               Task disable_unnecessary_services: shell agent signaled completed
+2026-10-16 04:14:37  WARNING   __main__                        Task disable_unnecessary_services was completed by the executor, but rejected by planner validation; retrying or failing the task.
+2026-10-16 04:14:37  WARNING   tasks.task_manager              Retry   Task(disable_unnecessary_services) [PENDING] priority=11 retries=1 | Identify and disable unnecessary services on the workstation to reduce the attac (attempt 1) priority=11
+2026-10-16 04:14:37  INFO      __main__                        --------------------------------------------------
+2026-10-16 04:14:37  INFO      __main__                        Iteration 7 / 50
+2026-10-16 04:14:48  INFO      planner.planner                 Planner action: create_tasks
+2026-10-16 04:14:48  INFO      __main__                        Skipping duplicate planner task already pending/running: Configure the system to enable detailed logging for security auditing purposes.
+2026-10-16 04:14:48  INFO      __main__                        Skipping duplicate planner task already pending/running: Run a comprehensive security audit to identify and address vulnerabilities on the workstation.
+2026-10-16 04:14:48  INFO      __main__                        Skipping duplicate planner task already pending/running: Update all system packages to their latest versions to patch known vulnerabilities.
+2026-10-16 04:14:48  INFO      tasks.task_manager              Queued  Task(disable_unnecessary_services) [PENDING] priority=4 retries=0 | Disable unnecessary services to reduce attack surface.
+2026-10-16 04:14:48  INFO      __main__                        Skipping duplicate planner task already pending/running: Install additional security tools such as fail2ban, ClamAV, and OSSEC to enhance the workstation's security posture.
+2026-10-16 04:14:48  INFO      __main__                        Skipping duplicate planner task already pending/running: Configure the firewall to allow only necessary traffic and block all other incoming and outgoing connections.
+2026-10-16 04:14:48  INFO      tasks.task_manager              Running Task(enable_logging) [RUNNING] priority=2 retries=0 | Configure the system to enable detailed logging for security auditing purposes.
+2026-10-16 04:14:48  INFO      executor.executor               Task enable_logging: joined the currently running terminal session (mywork:2.0)
+2026-10-16 04:14:50  INFO      executor.executor               Task enable_logging: running `sudo apt update`
+2026-10-16 04:14:52  INFO      executor.executor               Task enable_logging: running `sudo apt install -y rsyslog`
+2026-10-16 04:14:56  INFO      executor.executor               Task enable_logging: running `sudo apt install -y rsyslog`
+2026-10-16 04:15:00  INFO      executor.executor               Task enable_logging: running `sudo apt install -y rsyslog`
+2026-10-16 04:15:06  INFO      executor.executor               Task enable_logging: running `sudo systemctl --no-pager enable rsyslog`
+2026-10-16 04:15:11  INFO      executor.executor               Task enable_logging: running `sudo systemctl --no-pager status rsyslog`
+2026-10-16 04:15:17  INFO      executor.executor               Task enable_logging: running `sudo systemctl --no-pager status rsyslog`
+2026-10-16 04:15:22  INFO      executor.executor               Task enable_logging: running `sudo systemctl --no-pager status rsyslog`
+2026-10-16 04:15:29  INFO      executor.executor               Task enable_logging: running `sudo systemctl --no-pager status rsyslog`
+2026-10-16 04:15:35  INFO      executor.executor               Task enable_logging: running `sudo systemctl --no-pager status rsyslog`
+2026-10-16 04:15:41  INFO      executor.executor               Task enable_logging: shell agent signaled completed
+2026-10-16 04:15:43  INFO      tasks.task_manager              Done    Task(enable_logging) [COMPLETED] priority=2 retries=0 | Configure the system to enable detailed logging for security auditing purposes.
+2026-10-16 04:15:43  INFO      __main__                        --------------------------------------------------
+2026-10-16 04:15:43  INFO      __main__                        Iteration 8 / 50
+2026-10-16 04:15:53  INFO      planner.planner                 Planner action: create_tasks
+2026-10-16 04:15:53  INFO      __main__                        Skipping duplicate planner task already pending/running: Update all system packages to their latest versions to patch known vulnerabilities.
+2026-10-16 04:15:53  INFO      __main__                        Skipping duplicate planner task already pending/running: Disable unnecessary services to reduce attack surface.
+2026-10-16 04:15:53  INFO      __main__                        Skipping duplicate planner task already pending/running: Install additional security tools such as fail2ban, ClamAV, and OSSEC to enhance the workstation's security posture.
+2026-10-16 04:15:53  INFO      __main__                        Skipping duplicate planner task already pending/running: Configure the firewall to allow only necessary traffic and block all other incoming and outgoing connections.
+2026-10-16 04:15:53  INFO      __main__                        Skipping duplicate planner task already pending/running: Run a comprehensive security audit to identify and address vulnerabilities on the workstation.
+2026-10-16 04:15:53  INFO      tasks.task_manager              Running Task(perform_security_audit) [RUNNING] priority=3 retries=0 | Run a comprehensive security audit to identify and address vulnerabilities on th
+2026-10-16 04:15:53  INFO      executor.executor               Task perform_security_audit: joined the currently running terminal session (mywork:2.0)
+2026-10-16 04:15:55  INFO      executor.executor               Task perform_security_audit: running `sudo apt update && sudo apt upgrade -y`
+2026-10-16 04:15:58  INFO      executor.executor               Task perform_security_audit: running `sudo apt install -y lynis`
+2026-10-16 04:16:01  INFO      executor.executor               Task perform_security_audit: running `sudo apt install -y lynis`
+2026-10-16 04:16:07  INFO      executor.executor               Task perform_security_audit: running `sudo apt install -y lynis`
+2026-10-16 04:16:12  INFO      executor.executor               Task perform_security_audit: running `sudo lynis audit system`
+2026-10-16 04:16:18  INFO      executor.executor               Task perform_security_audit: running `sudo apt install -y lynis`
+2026-10-16 04:16:24  INFO      executor.executor               Task perform_security_audit: running `sudo apt install -y lynis`
+2026-10-16 04:16:31  INFO      executor.executor               Task perform_security_audit: shell agent signaled failed
+2026-10-16 04:16:31  WARNING   tasks.task_manager              Retry   Task(perform_security_audit) [PENDING] priority=13 retries=1 | Run a comprehensive security audit to identify and address vulnerabilities on th (attempt 1) priority=13
+2026-10-16 04:16:31  INFO      __main__                        --------------------------------------------------
+2026-10-16 04:16:31  INFO      __main__                        Iteration 9 / 50
+2026-10-16 04:16:41  INFO      planner.planner                 Planner action: create_tasks
+2026-10-16 04:16:41  INFO      __main__                        Skipping duplicate planner task already pending/running: Update all system packages to their latest versions to patch known vulnerabilities.
+2026-10-16 04:16:41  INFO      __main__                        Skipping duplicate planner task already pending/running: Disable unnecessary services to reduce attack surface.
+2026-10-16 04:16:41  INFO      __main__                        Skipping duplicate planner task already pending/running: Install additional security tools such as fail2ban, ClamAV, and OSSEC to enhance the workstation's security posture.
+2026-10-16 04:16:41  INFO      __main__                        Skipping duplicate planner task already pending/running: Configure the firewall to allow only necessary traffic and block all other incoming and outgoing connections.
+2026-10-16 04:16:41  INFO      tasks.task_manager              Queued  Task(perform_security_audit) [PENDING] priority=7 retries=0 | Run a security audit to identify and fix vulnerabilities.
+2026-10-16 04:16:41  INFO      __main__                        Skipping duplicate planner task already pending/running: Ensure SSH configuration is hardened to prevent unauthorized access, including disabling root login and password authentication.
+2026-10-16 04:16:41  INFO      tasks.task_manager              Running Task(update_system) [RUNNING] priority=4 retries=0 | Update all system packages to their latest versions to patch known vulnerabiliti
+2026-10-16 04:16:41  INFO      executor.executor               Task update_system: joined the currently running terminal session (mywork:2.0)
+2026-10-16 04:16:43  INFO      executor.executor               Task update_system: running `sudo apt update && sudo apt upgrade -y`
+2026-10-16 04:16:46  INFO      executor.executor               Task update_system: running `sudo apt update && sudo apt upgrade -y`
+2026-10-16 04:16:49  INFO      executor.executor               Task update_system: running `sudo apt update && sudo apt upgrade -y`
+2026-10-16 04:16:55  INFO      executor.executor               Task update_system: running `sudo apt update && sudo apt upgrade -y`
+2026-10-16 04:17:00  INFO      executor.executor               Task update_system: running `sudo apt update && sudo apt upgrade -y`
+2026-10-16 04:17:04  WARNING   __main__                        Interrupted by user — state saved, resume any time.
+2026-10-16 04:24:53  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:24:53  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 04:24:53  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:24:53  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 04:24:53  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 04:24:53  INFO      tasks.task_manager              Queued  Task(retry) [PENDING] priority=1 retries=1 | verify internet connectivity
+2026-10-16 04:24:53  INFO      tasks.task_manager              Cancelled Task(retry) [CANCELLED] priority=1 retries=1 | verify internet connectivity | Superseded by planner-confirmed goal completion.
+2026-10-16 04:24:53  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:24:53  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:24:53  INFO      tasks.task_manager              Queued  Task(t1) [PENDING] priority=1 retries=0 | inspect docker-compose
+2026-10-16 04:24:53  INFO      tasks.task_manager              Queued  Task(t2) [PENDING] priority=3 retries=0 | update docker-compose
+2026-10-16 04:24:53  WARNING   tasks.task_manager              Retry   Task(t1) [PENDING] priority=11 retries=1 | inspect docker-compose (attempt 1) priority=11
+2026-10-16 04:24:53  INFO      executor.executor               Task connectivity: joined the currently running terminal session (nyx:1.0)
+2026-10-16 04:24:53  INFO      memory.task_store               TaskStore opened: /tmp/pytest-of-fatal0x01/pytest-4/test_successful_connectivity_p0/tasks.db
+2026-10-16 04:24:53  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:24:53  INFO      tasks.task_manager              Queued  Task(ping) [PENDING] priority=1 retries=0 | Ping an external address
+2026-10-16 04:24:53  INFO      tasks.task_manager              Queued  Task(restart) [PENDING] priority=2 retries=0 | Restart networking service
+2026-10-16 04:24:53  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:24:53  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 04:24:53  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:24:53  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 04:24:53  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 04:25:12  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:25:12  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 04:25:12  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:25:12  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 04:25:12  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 04:25:12  INFO      tasks.task_manager              Queued  Task(retry) [PENDING] priority=1 retries=1 | verify internet connectivity
+2026-10-16 04:25:12  INFO      tasks.task_manager              Cancelled Task(retry) [CANCELLED] priority=1 retries=1 | verify internet connectivity | Superseded by planner-confirmed goal completion.
+2026-10-16 04:25:12  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:25:12  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:25:12  INFO      tasks.task_manager              Queued  Task(t1) [PENDING] priority=1 retries=0 | inspect docker-compose
+2026-10-16 04:25:12  INFO      tasks.task_manager              Queued  Task(t2) [PENDING] priority=3 retries=0 | update docker-compose
+2026-10-16 04:25:12  WARNING   tasks.task_manager              Retry   Task(t1) [PENDING] priority=11 retries=1 | inspect docker-compose (attempt 1) priority=11
+2026-10-16 04:25:12  INFO      executor.executor               Task connectivity: joined the currently running terminal session (nyx:1.0)
+2026-10-16 04:25:12  INFO      executor.executor               Task connectivity: running `ping -c 1 8.8.8.8`
+2026-10-16 04:25:12  INFO      memory.task_store               TaskStore opened: /tmp/pytest-of-fatal0x01/pytest-5/test_successful_connectivity_p0/tasks.db
+2026-10-16 04:25:12  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:25:12  INFO      tasks.task_manager              Queued  Task(ping) [PENDING] priority=1 retries=0 | Ping an external address
+2026-10-16 04:25:12  INFO      tasks.task_manager              Queued  Task(restart) [PENDING] priority=2 retries=0 | Restart networking service
+2026-10-16 04:25:12  INFO      orchestrator                    --------------------------------------------------
+2026-10-16 04:25:12  INFO      orchestrator                    Iteration 1 / 50
+2026-10-16 04:25:12  INFO      tasks.task_manager              Done    Task(ping) [COMPLETED] priority=1 retries=0 | Ping an external address
+2026-10-16 04:25:12  INFO      tasks.task_manager              Cancelled Task(restart) [CANCELLED] priority=2 retries=0 | Restart networking service | Superseded: a successful ping confirmed the requested network connectivity.
+2026-10-16 04:25:12  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:25:12  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 04:25:12  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:25:12  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 04:25:12  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 04:25:49  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:25:49  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 04:25:49  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:25:49  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 04:25:49  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 04:25:49  INFO      tasks.task_manager              Queued  Task(retry) [PENDING] priority=1 retries=1 | verify internet connectivity
+2026-10-16 04:25:49  INFO      tasks.task_manager              Cancelled Task(retry) [CANCELLED] priority=1 retries=1 | verify internet connectivity | Superseded by planner-confirmed goal completion.
+2026-10-16 04:25:49  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:25:49  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:25:49  INFO      tasks.task_manager              Queued  Task(t1) [PENDING] priority=1 retries=0 | inspect docker-compose
+2026-10-16 04:25:49  INFO      tasks.task_manager              Queued  Task(t2) [PENDING] priority=3 retries=0 | update docker-compose
+2026-10-16 04:25:49  WARNING   tasks.task_manager              Retry   Task(t1) [PENDING] priority=11 retries=1 | inspect docker-compose (attempt 1) priority=11
+2026-10-16 04:25:49  INFO      executor.executor               Task connectivity: joined the currently running terminal session (nyx:1.0)
+2026-10-16 04:25:49  INFO      executor.executor               Task connectivity: running `ping -c 1 8.8.8.8`
+2026-10-16 04:25:49  INFO      memory.task_store               TaskStore opened: /tmp/pytest-of-fatal0x01/pytest-6/test_successful_connectivity_p0/tasks.db
+2026-10-16 04:25:49  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:25:49  INFO      tasks.task_manager              Queued  Task(ping) [PENDING] priority=1 retries=0 | Ping an external address
+2026-10-16 04:25:49  INFO      tasks.task_manager              Queued  Task(restart) [PENDING] priority=2 retries=0 | Restart networking service
+2026-10-16 04:25:49  INFO      orchestrator                    --------------------------------------------------
+2026-10-16 04:25:49  INFO      orchestrator                    Iteration 1 / 50
+2026-10-16 04:25:49  INFO      tasks.task_manager              Done    Task(ping) [COMPLETED] priority=1 retries=0 | Ping an external address
+2026-10-16 04:25:49  INFO      tasks.task_manager              Cancelled Task(restart) [CANCELLED] priority=2 retries=0 | Restart networking service | Superseded: a successful ping confirmed the requested network connectivity.
+2026-10-16 04:25:49  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:25:49  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 04:25:49  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:25:49  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 04:25:49  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 04:26:37  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:26:37  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 04:26:37  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:26:37  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 04:26:37  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 04:26:37  INFO      tasks.task_manager              Queued  Task(retry) [PENDING] priority=1 retries=1 | verify internet connectivity
+2026-10-16 04:26:37  INFO      tasks.task_manager              Cancelled Task(retry) [CANCELLED] priority=1 retries=1 | verify internet connectivity | Superseded by planner-confirmed goal completion.
+2026-10-16 04:26:37  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:26:37  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:26:37  INFO      tasks.task_manager              Queued  Task(t1) [PENDING] priority=1 retries=0 | inspect docker-compose
+2026-10-16 04:26:37  INFO      tasks.task_manager              Queued  Task(t2) [PENDING] priority=3 retries=0 | update docker-compose
+2026-10-16 04:26:37  WARNING   tasks.task_manager              Retry   Task(t1) [PENDING] priority=11 retries=1 | inspect docker-compose (attempt 1) priority=11
+2026-10-16 04:26:37  INFO      executor.executor               Task connectivity: joined the currently running terminal session (nyx:1.0)
+2026-10-16 04:26:37  INFO      executor.executor               Task connectivity: running `ping -c 1 8.8.8.8`
+2026-10-16 04:26:37  INFO      memory.task_store               TaskStore opened: /tmp/pytest-of-fatal0x01/pytest-8/test_successful_connectivity_p0/tasks.db
+2026-10-16 04:26:37  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:26:37  INFO      tasks.task_manager              Queued  Task(ping) [PENDING] priority=1 retries=0 | Ping an external address
+2026-10-16 04:26:37  INFO      tasks.task_manager              Queued  Task(restart) [PENDING] priority=2 retries=0 | Restart networking service
+2026-10-16 04:26:37  INFO      orchestrator                    --------------------------------------------------
+2026-10-16 04:26:37  INFO      orchestrator                    Iteration 1 / 50
+2026-10-16 04:26:37  INFO      tasks.task_manager              Done    Task(ping) [COMPLETED] priority=1 retries=0 | Ping an external address
+2026-10-16 04:26:37  INFO      tasks.task_manager              Cancelled Task(restart) [CANCELLED] priority=2 retries=0 | Restart networking service | Superseded: a successful ping confirmed the requested network connectivity.
+2026-10-16 04:26:37  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:26:37  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 04:26:37  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:26:37  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 04:26:37  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 04:28:08  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:28:08  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 04:28:08  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:28:08  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 04:28:08  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 04:28:08  INFO      tasks.task_manager              Queued  Task(retry) [PENDING] priority=1 retries=1 | verify internet connectivity
+2026-10-16 04:28:08  INFO      tasks.task_manager              Cancelled Task(retry) [CANCELLED] priority=1 retries=1 | verify internet connectivity | Superseded by planner-confirmed goal completion.
+2026-10-16 04:28:08  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:28:08  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:28:08  INFO      tasks.task_manager              Queued  Task(t1) [PENDING] priority=1 retries=0 | inspect docker-compose
+2026-10-16 04:28:08  INFO      tasks.task_manager              Queued  Task(t2) [PENDING] priority=3 retries=0 | update docker-compose
+2026-10-16 04:28:08  WARNING   tasks.task_manager              Retry   Task(t1) [PENDING] priority=11 retries=1 | inspect docker-compose (attempt 1) priority=11
+2026-10-16 04:28:08  INFO      executor.executor               Task connectivity: joined the currently running terminal session (nyx:1.0)
+2026-10-16 04:28:08  INFO      executor.executor               Task connectivity: running `ping -c 1 8.8.8.8`
+2026-10-16 04:28:08  INFO      memory.task_store               TaskStore opened: /tmp/pytest-of-fatal0x01/pytest-9/test_successful_connectivity_p0/tasks.db
+2026-10-16 04:28:08  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:28:08  INFO      tasks.task_manager              Queued  Task(ping) [PENDING] priority=1 retries=0 | Ping an external address
+2026-10-16 04:28:08  INFO      tasks.task_manager              Queued  Task(restart) [PENDING] priority=2 retries=0 | Restart networking service
+2026-10-16 04:28:08  INFO      orchestrator                    --------------------------------------------------
+2026-10-16 04:28:08  INFO      orchestrator                    Iteration 1 / 50
+2026-10-16 04:28:08  INFO      tasks.task_manager              Done    Task(ping) [COMPLETED] priority=1 retries=0 | Ping an external address
+2026-10-16 04:28:08  INFO      tasks.task_manager              Cancelled Task(restart) [CANCELLED] priority=2 retries=0 | Restart networking service | Superseded: a successful ping confirmed the requested network connectivity.
+2026-10-16 04:28:08  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:28:08  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 04:28:08  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:28:08  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 04:28:08  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)

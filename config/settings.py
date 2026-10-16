@@ -43,7 +43,15 @@ RESUME_PREVIOUS_SESSION = False                   # set True only if you intenti
 TMUX_SESSION_NAME = "nyx"           # session created when not launched inside tmux
 MAX_SHELL_STEPS_PER_TASK = 12      # commands the executor may run before giving up
 SHELL_COMMAND_TIMEOUT = 120        # seconds to wait for a single command
-TERMINAL_HISTORY_LINES = 4000      # scrollback lines captured for context
+
+# ─── Optional SSH execution ────────────────────────────────────────────────
+
+SSH_DEFAULT_USER = "root"
+SSH_DEFAULT_OPTIONS = (
+    "HostKeyAlgorithms=+ssh-rsa",
+    "PubkeyAcceptedAlgorithms=+ssh-rsa",
+)
+SSH_CONNECT_TIMEOUT = 60
 
 # ─── Database ────────────────────────────────────────────────────────────────
 
@@ -52,6 +60,7 @@ import os
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 TASK_DB_PATH = os.path.join(DATA_DIR, "task_history.db")
+CONTROL_DB_PATH = os.path.join(DATA_DIR, "orchestrator_control.db")
 
 # ─── Logging ─────────────────────────────────────────────────────────────────
 

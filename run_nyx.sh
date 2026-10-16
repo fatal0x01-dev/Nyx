@@ -14,9 +14,14 @@ fi
 . "$VENV_DIR/bin/activate"
 
 python -m pip install --upgrade pip >/dev/null 2>&1 || true
-python -m pip install httpx pydantic rich python-dotenv pyyaml tenacity pytest >/dev/null 2>&1 || true
+python -m pip install httpx pydantic rich textual python-dotenv pyyaml tenacity pytest >/dev/null 2>&1 || true
 
 cd "$ROOT_DIR"
+
+if [ "$#" -gt 0 ] && [ "$1" = "--frontend" ]; then
+  shift
+  exec python frontend.py "$@"
+fi
 
 if [ "$#" -gt 0 ]; then
   python orchestrator.py "$@"

@@ -6,6 +6,7 @@ The project is intentionally opinionated:
 
 - a planner decides what should happen next
 - an executor runs one shell command at a time in a real tmux session
+- the executor uses only command output from the current task, never prior terminal scrollback
 - task state is persisted in SQLite so work can resume across runs
 - completion is re-checked by the planner before the goal is treated as done
 
@@ -26,7 +27,7 @@ Nyx will:
 2. enqueue those tasks in a priority queue
 3. pick the highest-priority pending task
 4. hand that task to an executor model
-5. run shell commands in a live tmux terminal, using terminal scrollback as context
+5. run shell commands in a live tmux terminal, using only current-task command output as context
 6. inspect command output, decide whether the task is complete or failed
 7. retry or re-plan when needed
 8. only mark a goal as finished when the planner confirms the task queue is empty and the outcome is valid
@@ -95,6 +96,32 @@ Important knobs include:
 - `TMUX_SESSION_NAME`
 - `TASK_DB_PATH`
 
+### Optional SSH execution
+
+SSH is opt-in. Use `--ssh` to open a persistent remote shell in a new window
+of the current tmux session before the planner starts; Nyx stays running in
+its original window and executes tasks in the SSH window. Without that flag,
+Nyx stays on its normal terminal.
+The default target and compatibility options match:
+
+```bash
+ssh -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa root@172.16.42.1
+```
+
+For example:
+
+```bash
+bash run_nyx.sh --ssh --ip 172.16.42.1 "check the remote host"
+bash run_nyx.sh --ssh --ip 192.0.2.10 --ssh-user admin --ssh-port 2222 "check the remote host"
+```
+
+`--ip` is required whenever `--ssh` is supplied. Use `--ssh-identity-file PATH` to select a key. Repeat `--ssh-option VALUE` to
+specify custom OpenSSH `-o` options; providing one or more custom options
+replaces the default legacy-RSA compatibility options. SSH authentication and
+host-key confirmation prompts are handled in the terminal during connection.
+After connection, planning and task validation are told which remote host is
+active, and executor commands run in that remote shell.
+
 ## Project structure
 
 ```text
@@ -102,6 +129,7 @@ nyx/
 ├── config/              # runtime settings and model config
 ├── data/                # SQLite DB and logs
 ├── executor/            # shell-driving executor and prompts
+├── frontend.py          # separate-terminal Textual run controls
 ├── memory/              # persistent task/memory store code
 ├── my-executor/         # separate executor prototype / compose setup
 ├── orchestrator.py      # main orchestration loop
@@ -129,7 +157,7 @@ A typical run looks like this:
    - validate the current config
    - update the nginx service if it is malformed
    - verify the service is running
-4. The executor chooses shell commands one at a time, reading output and terminal history as evidence
+4. The executor chooses shell commands one at a time, using output from the current task as evidence
 5. If a command fails, the planner may decide to retry differently or change the plan
 6. Once the queue is empty and the planner accepts the evidence, the orchestration loop finishes
 
@@ -143,6 +171,28 @@ This project is experimental and intentionally narrow in scope:
 - it is best suited for tasks where terminal context matters more than pure API/tool orchestration
 
 The queue and run state are persisted in SQLite, so a previous session can be resumed if that behavior is enabled in configuration. By default, stale pending tasks are cleared unless explicitly configured otherwise.
+
+## Live control dashboard
+
+Keep the orchestrator's detailed debug output in its terminal. In a second
+terminal, from the project directory, run:
+
+```bash
+./run_nyx.sh --frontend
+```
+
+The dashboard attaches to the latest Nyx run and shows its goal, phase,
+iteration, and current task. Use **Pause run** to pause at the next safe
+checkpoint (the current model request or shell command is allowed to finish),
+and **Resume run** to continue. Enter a suggestion and press Enter or
+**Send guidance** to include it in subsequent planner, executor, and
+validation prompts for the current run. Suggestions do not rewrite the goal
+and do not override Nyx's safety rules.
+
+The dashboard and orchestrator communicate through
+`data/orchestrator_control.db`; this is local control state, separate from the
+task-history database and the debug logs. Close the dashboard with Ctrl+C; this
+does not stop the orchestrator.
 
 ## Safety and expectations
 
