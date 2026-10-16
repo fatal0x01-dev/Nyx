@@ -28,7 +28,9 @@ def test_atomic_write_replaces_complete_multiline_file_and_preserves_mode(tmp_pa
     path.chmod(0o640)
     new_contents = "first=new\nsecond=updated\nthird=keep\nfourth=added\n"
 
-    result = _run_generated_command(build_write_file_command(str(path), new_contents))
+    command = build_write_file_command(str(path), new_contents)
+    assert "\n" not in command
+    result = _run_generated_command(command)
 
     assert result.returncode == 0, result.stderr
     assert "Atomic file replacement completed" in result.stdout
@@ -42,7 +44,9 @@ def test_read_file_returns_complete_utf8_content_without_losing_newlines(tmp_pat
     contents = "\n first line \nsecond line\n\n"
     path.write_text(contents, encoding="utf-8")
 
-    result = _run_generated_command(build_read_file_command(str(path)))
+    command = build_read_file_command(str(path))
+    assert "\n" not in command
+    result = _run_generated_command(command)
 
     assert result.returncode == 0, result.stderr
     assert decode_read_file_output(result.stdout) == contents
@@ -51,7 +55,9 @@ def test_read_file_returns_complete_utf8_content_without_losing_newlines(tmp_pat
 def test_read_file_reports_missing_target_for_creation_tasks(tmp_path):
     path = tmp_path / "new-config.yml"
 
-    result = _run_generated_command(build_read_file_command(str(path)))
+    command = build_read_file_command(str(path))
+    assert "\n" not in command
+    result = _run_generated_command(command)
 
     assert result.returncode == 0
     assert result.stdout == MISSING_FILE_SENTINEL

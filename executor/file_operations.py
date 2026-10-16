@@ -75,7 +75,7 @@ print("Atomic file replacement completed")
 def build_read_file_command(path: str) -> str:
     if not path or "\x00" in path:
         raise ValueError("A valid file path is required")
-    return f"python3 -c {shlex.quote(READ_FILE_SCRIPT)} {shlex.quote(path)}"
+    return _build_python_script_command(READ_FILE_SCRIPT, path)
 
 
 def decode_read_file_output(output: str) -> str:
@@ -97,7 +97,15 @@ def build_write_file_command(path: str, content: str) -> str:
             f"File content exceeds the 48 KiB ({MAX_FILE_BYTES}-byte) limit"
         )
     payload = base64.b64encode(content_bytes).decode("ascii")
-    return (
-        f"python3 -c {shlex.quote(WRITE_FILE_SCRIPT)} "
-        f"{shlex.quote(path)} {shlex.quote(payload)}"
-    )
+    command = _build_python_script_command(WRITE_FILE_SCRIPT, path)
+    return f"{command} {shlex.quote(payload)}"
+
+
+def _build_python_script_command(script: str, *arguments: str) -> str:
+    """Encode helper source so tmux submits it as one terminal line."""
+    encoded_script = base64.b64encode(script.encode("utf-8")).decode("ascii")
+    bootstrap = f"import base64;exec(base64.b64decode({encoded_script!r}))"
+    command = f"python3 -c {shlex.quote(bootstrap)}"
+    if arguments:
+        command += " " + " ".join(shlex.quote(argument) for argument in arguments)
+    return command

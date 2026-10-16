@@ -52,6 +52,11 @@ Rules:
   changes in memory, then replace it once with write_file. Do not use sed,
   echo, printf, tee, or shell redirection to modify files. Nyx verifies the
   replacement by reading the complete file back.
+- Never use run_command or embedded Python/shell code to create, read, or write
+  a requested project/configuration file; use the dedicated read_file and
+  write_file actions. For a Dockerfile task, read the exact Dockerfile path
+  first (a missing-file result is normal), then write its complete contents
+  with write_file before running Docker commands.
 - For tasks that create a source, markup, or configuration file, generate the
   actual requested contents yourself and pass the complete contents to
   write_file. Do not substitute shell commands that only describe, print, or
