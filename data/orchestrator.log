@@ -1837,3 +1837,87 @@ IndexError: list index out of range
 2026-10-16 04:28:08  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
 2026-10-16 04:28:08  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
 2026-10-16 04:28:08  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 04:31:49  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:31:49  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 04:31:49  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:31:49  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 04:31:49  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 04:31:49  INFO      __main__                        ============================================================
+2026-10-16 04:31:49  INFO      __main__                        ORCHESTRATOR START
+2026-10-16 04:31:49  INFO      __main__                        Goal: establish network connectivity
+2026-10-16 04:31:49  INFO      __main__                        ============================================================
+2026-10-16 04:31:49  INFO      __main__                        Checking executor availability...
+2026-10-16 04:31:49  WARNING   __main__                        Executor LM Studio not reachable at http://localhost:11434/v1 — make sure it's running before tasks are dispatched.
+2026-10-16 04:31:49  INFO      __main__                        Not running inside tmux — executor will drive a detached session named 'nyx'. Run `tmux attach -t nyx` to watch/join.
+2026-10-16 04:31:49  INFO      utils.tmux_client               Attaching to current running tmux pane: mywork:2.0
+2026-10-16 04:31:49  INFO      executor.executor               Opening SSH connection to kali@192.168.1.69 in tmux window mywork:3.0
+2026-10-16 04:32:06  INFO      __main__                        --------------------------------------------------
+2026-10-16 04:32:06  INFO      __main__                        Iteration 1 / 50
+2026-10-16 04:32:12  INFO      planner.planner                 Planner action: create_tasks
+2026-10-16 04:32:12  INFO      tasks.task_manager              Queued  Task(task1) [PENDING] priority=1 retries=0 | Ping the default gateway to check network connectivity
+2026-10-16 04:32:12  INFO      tasks.task_manager              Running Task(task1) [RUNNING] priority=1 retries=0 | Ping the default gateway to check network connectivity
+2026-10-16 04:32:12  INFO      executor.executor               Task task1: joined the currently running terminal session (mywork:3.0)
+2026-10-16 04:32:15  INFO      executor.executor               Task task1: running `ip route | grep default | awk '{print $3}'`
+2026-10-16 04:32:18  INFO      executor.executor               Task task1: running `ping -c 1 192.168.1.254`
+2026-10-16 04:32:24  WARNING   __main__                        Task task1 was completed by the executor, but rejected by planner validation; retrying or failing the task.
+2026-10-16 04:32:24  WARNING   tasks.task_manager              Retry   Task(task1) [PENDING] priority=11 retries=1 | Ping the default gateway to check network connectivity (attempt 1) priority=11
+2026-10-16 04:32:24  INFO      tasks.task_manager              Cancelled Task(task1) [CANCELLED] priority=11 retries=1 | Ping the default gateway to check network connectivity | Superseded: a successful ping confirmed the requested network connectivity.
+2026-10-16 04:32:24  INFO      __main__                        ============================================================
+2026-10-16 04:32:24  INFO      __main__                        GOAL COMPLETE after 1 iterations (35.2s)
+2026-10-16 04:32:24  INFO      __main__                        Message: Network connectivity was confirmed by a successful ping.
+2026-10-16 04:32:24  INFO      __main__                        ============================================================
+2026-10-16 04:36:35  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:36:35  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 04:36:35  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:36:35  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 04:36:35  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 04:36:35  INFO      __main__                        ============================================================
+2026-10-16 04:36:35  INFO      __main__                        ORCHESTRATOR START
+2026-10-16 04:36:35  INFO      __main__                        Goal: establish network connectivity
+2026-10-16 04:36:35  INFO      __main__                        ============================================================
+2026-10-16 04:36:35  INFO      __main__                        Checking executor availability...
+2026-10-16 04:36:35  WARNING   __main__                        Executor LM Studio not reachable at http://localhost:11434/v1 — make sure it's running before tasks are dispatched.
+2026-10-16 04:36:35  INFO      __main__                        Not running inside tmux — executor will drive a detached session named 'nyx'. Run `tmux attach -t nyx` to watch/join.
+2026-10-16 04:36:35  INFO      utils.tmux_client               Attaching to current running tmux pane: mywork:3.0
+2026-10-16 04:36:35  INFO      executor.executor               Opening SSH connection to kali@192.168.1.69 in tmux window mywork:4.0
+2026-10-16 04:36:38  INFO      __main__                        --------------------------------------------------
+2026-10-16 04:36:38  INFO      __main__                        Iteration 1 / 50
+2026-10-16 04:36:40  INFO      planner.planner                 Planner action: create_tasks
+2026-10-16 04:36:40  INFO      tasks.task_manager              Queued  Task(check_network_connectivity) [PENDING] priority=1 retries=0 | Ping an external IP address to check network connectivity
+2026-10-16 04:36:40  INFO      tasks.task_manager              Running Task(check_network_connectivity) [RUNNING] priority=1 retries=0 | Ping an external IP address to check network connectivity
+2026-10-16 04:36:40  INFO      executor.executor               Task check_network_connectivity: joined the currently running terminal session (mywork:4.0)
+2026-10-16 04:36:42  INFO      executor.executor               Task check_network_connectivity: running `ping -c 1 8.8.8.8`
+2026-10-16 04:36:45  WARNING   __main__                        Task check_network_connectivity was completed by the executor, but rejected by planner validation; retrying or failing the task.
+2026-10-16 04:36:45  WARNING   tasks.task_manager              Retry   Task(check_network_connectivity) [PENDING] priority=11 retries=1 | Ping an external IP address to check network connectivity (attempt 1) priority=11
+2026-10-16 04:36:45  INFO      tasks.task_manager              Cancelled Task(check_network_connectivity) [CANCELLED] priority=11 retries=1 | Ping an external IP address to check network connectivity | Superseded: a successful ping confirmed the requested network connectivity.
+2026-10-16 04:36:45  INFO      __main__                        ============================================================
+2026-10-16 04:36:45  INFO      __main__                        GOAL COMPLETE after 1 iterations (10.3s)
+2026-10-16 04:36:45  INFO      __main__                        Message: Network connectivity was confirmed by a successful ping.
+2026-10-16 04:36:45  INFO      __main__                        ============================================================
+2026-10-16 04:40:01  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:40:01  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 04:40:01  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:40:01  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 04:40:01  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 04:40:01  INFO      tasks.task_manager              Queued  Task(retry) [PENDING] priority=1 retries=1 | verify internet connectivity
+2026-10-16 04:40:01  INFO      tasks.task_manager              Cancelled Task(retry) [CANCELLED] priority=1 retries=1 | verify internet connectivity | Superseded by planner-confirmed goal completion.
+2026-10-16 04:40:01  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:40:01  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:40:01  INFO      tasks.task_manager              Queued  Task(t1) [PENDING] priority=1 retries=0 | inspect docker-compose
+2026-10-16 04:40:01  INFO      tasks.task_manager              Queued  Task(t2) [PENDING] priority=3 retries=0 | update docker-compose
+2026-10-16 04:40:01  WARNING   tasks.task_manager              Retry   Task(t1) [PENDING] priority=11 retries=1 | inspect docker-compose (attempt 1) priority=11
+2026-10-16 04:40:01  INFO      executor.executor               Task connectivity: joined the currently running terminal session (nyx:1.0)
+2026-10-16 04:40:01  INFO      executor.executor               Task connectivity: running `ping -c 1 8.8.8.8`
+2026-10-16 04:40:01  INFO      memory.task_store               TaskStore opened: /tmp/pytest-of-fatal0x01/pytest-10/test_successful_connectivity_p0/tasks.db
+2026-10-16 04:40:01  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:40:01  INFO      tasks.task_manager              Queued  Task(ping) [PENDING] priority=1 retries=0 | Ping an external address
+2026-10-16 04:40:01  INFO      tasks.task_manager              Queued  Task(restart) [PENDING] priority=2 retries=0 | Restart networking service
+2026-10-16 04:40:01  INFO      orchestrator                    --------------------------------------------------
+2026-10-16 04:40:01  INFO      orchestrator                    Iteration 1 / 50
+2026-10-16 04:40:01  INFO      tasks.task_manager              Done    Task(ping) [COMPLETED] priority=1 retries=0 | Ping an external address
+2026-10-16 04:40:01  INFO      tasks.task_manager              Cancelled Task(restart) [CANCELLED] priority=2 retries=0 | Restart networking service | Superseded: a successful ping confirmed the requested network connectivity.
+2026-10-16 04:40:01  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 04:40:01  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 04:40:01  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 04:40:01  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 04:40:01  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)

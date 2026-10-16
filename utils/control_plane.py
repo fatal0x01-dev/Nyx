@@ -71,6 +71,12 @@ class ControlPlane:
                 (run_id, goal, now, now),
             )
 
+    def reset(self) -> None:
+        """Clear dashboard run and guidance state back to the idle view."""
+        with self._connection() as connection:
+            connection.execute("DELETE FROM control_guidance")
+            connection.execute("DELETE FROM control_runs")
+
     def update_run(
         self,
         run_id: str,
