@@ -71,6 +71,30 @@ so a failed prerequisite is retried before lower-priority dependent setup tasks.
 
 This is not a browser automation project, a web app, or a generic agent framework. It is a local command-execution agent that works against the terminal and filesystem you already use.
 
+## Shared run brief (cross-role awareness)
+
+The planner, executor, and validator each used to see a different slice of the
+run, which let them contradict each other. Every task now gets a compact
+**run brief**, built by `tasks/run_brief.py` from the task store:
+
+- the overall goal (context only) and the full ordered plan with the current
+  task marked, so a role knows what belongs to *other* tasks
+- **established facts**: observations extracted by code (never by a model) from
+  successful command results, such as files written and verified, images built,
+  and the host port a container actually received. Facts override stale wording
+  in later task descriptions
+- a note about the previous attempt when a task is being retried
+
+The executor and validator receive the brief in dedicated prompt sections, and
+the planner receives the facts in its terminal context. The brief contains no
+raw terminal output, so the "current-task output only" rule still holds, and
+the validator's copy omits sibling outcomes so they cannot be mistaken for
+evidence.
+
+Related safeguards: a task that hit an error and then fixed it by re-running the
+same command is accepted instead of retried from scratch, and within a planned
+batch, application files are ordered ahead of the Dockerfile that copies them.
+
 ## How it runs
 
 The project is started from the repository root with:

@@ -48,6 +48,14 @@ Rules:
   task queue. The orchestrator owns its task metadata; return corrected
   descriptions and paths directly as planner tasks.
 - Task descriptions must be specific and actionable for an executor agent.
+- The executor sees only one task at a time plus a short brief, so make each
+  task description self-contained: include exact absolute paths, file names,
+  image and container names, and ports. A later task must repeat the exact
+  names an earlier task established.
+- ESTABLISHED FACTS in the terminal context are observed ground truth (for
+  example the host port a container was actually published on). When a fact
+  contradicts a pending task's wording, add a corrected task rather than
+  repeating the stale value.
 - Only signal goal_complete when all objectives have been met based on the task history and there are no pending tasks remaining.
 - If any task is still pending or running, do not signal goal_complete; instead continue with create_tasks or another actionable step.
 - Use failed-task evidence to choose a materially different approach, continue
@@ -79,7 +87,9 @@ Rules:
   of the terminal's current directory. Do not bundle file edits into a build
   task unless the plan explicitly requests a separate file-change task.
 - Keep setup tasks in dependency order: create and verify the project directory
-  before file writes; create files before image builds; build before container
+  before file writes; write application files (for example index.html) BEFORE
+  the Dockerfile that copies them, and have that Dockerfile task name the exact
+  file paths; create files before image builds; build before container
   runs; and run before endpoint verification. Do not schedule later tasks to
   investigate unrelated host services such as Apache when the goal is a Docker
   deployment.
@@ -130,6 +140,17 @@ Rules:
 - Reject weak evidence, empty results, generic claims, or output that does not prove the task actually happened.
 - Validate only the current task and current attempt. Ignore previous task outcomes,
   sibling task requirements, and unrelated terminal output.
+- The RUN BRIEF lists the full plan only so you know the SCOPE of this task. Work
+  that belongs to another plan item (for example writing the HTML, building the
+  image, running the container, or verifying the endpoint) is NOT missing from
+  this task. Never reject a task for lacking another plan item's work. The brief
+  is not evidence; judge evidence only from the terminal evidence.
+- ESTABLISHED FACTS take precedence over stale wording in the task text. If the
+  evidence uses a different host port than the task names and the facts or
+  evidence show a port conflict, that is acceptable.
+- Errors that happened earlier in the attempt and were then fixed by a later
+  successful run of the same command are expected recovery, not failure. Judge
+  the final state the attempt ended in.
 - Treat the current task's terminal evidence as direct evidence and check it against
   the stated task and goal.
 - For file creation or edits, verified read-back content is evidence of the exact
@@ -194,6 +215,7 @@ def build_validation_prompt(
   remote_context: str = "",
   guidance_text: str = "",
   terminal_context: str = "",
+  run_brief: str = "",
 ) -> str:
   return f"""GOAL:
 {goal}
@@ -203,6 +225,9 @@ EXECUTION ENVIRONMENT:
 
 USER GUIDANCE FOR THIS RUN:
 {guidance_text or "(none)"}
+
+RUN BRIEF (scope only, not evidence):
+{run_brief or "(not provided)"}
 
 RECENT TERMINAL OUTPUT FROM THIS RUN:
 {terminal_context or "(no terminal commands have run yet)"}

@@ -30,6 +30,12 @@ from memory.rag_store import RAGStore
 from tasks.task import Task, TaskStatus
 from tasks.task_manager import TaskManager
 from tasks.history import History
+from tasks.run_brief import (
+    build_run_brief,
+    extract_facts,
+    facts_section,
+    order_app_files_before_dockerfile,
+)
 from planner.planner import Planner
 from executor.executor import Executor
 from utils.logger import get_logger, get_reasoning_logger
@@ -297,6 +303,9 @@ class Orchestrator:
                 self._format_system_context(self._system_context),
                 on_refresh=self._persist_system_context,
             )
+            configure_brief = getattr(self._executor, "configure_run_brief", None)
+            if configure_brief is not None:
+                configure_brief(self._run_brief_text(task))
             self._run_task(task)
             safety_halt_reason = getattr(self, "_safety_halt_reason", "")
             if safety_halt_reason:
@@ -386,12 +395,47 @@ class Orchestrator:
         )
 
     def _terminal_context_text(self) -> str:
+        limit = 12000
         system_context = self._format_system_context(self._system_context)
-        sections = []
+        head = []
         if system_context:
-            sections.append(f"CURRENT SYSTEM CONTEXT:\n{system_context}")
-        sections.extend(self._recent_terminal_context[-8:])
-        return "\n\n".join(sections)[-12000:]
+            head.append(f"CURRENT SYSTEM CONTEXT:\n{system_context}")
+        facts = self._facts_text()
+        if facts:
+            head.append(facts)
+        head_text = "\n\n".join(head)
+        tail_text = "\n\n".join(self._recent_terminal_context[-8:])
+        if not head_text:
+            return tail_text[-limit:]
+        if not tail_text:
+            return head_text[-limit:]
+        # Trim only the older terminal output; the context and facts stay intact.
+        budget = max(0, limit - len(head_text) - 2)
+        if not budget:
+            return head_text[-limit:]
+        return head_text + "\n\n" + tail_text[-budget:]
+
+    def _all_tasks(self) -> list[Task]:
+        store = getattr(self, "_store", None)
+        if store is None:
+            return []
+        try:
+            return store.get_all_tasks()
+        except Exception as error:  # the brief must never take the run down
+            log.warning("Could not load tasks for the run brief: %s", error)
+            return []
+
+    def _facts_text(self) -> str:
+        return facts_section(self._all_tasks())
+
+    def _run_brief_text(self, task: Task, include_outcomes: bool = True) -> str:
+        """Shared plan/facts picture handed to the executor and validator."""
+        return build_run_brief(
+            self._goal,
+            self._all_tasks(),
+            current_task=task,
+            include_outcomes=include_outcomes,
+        )
 
     @staticmethod
     def _format_system_context(context: dict[str, str]) -> str:
@@ -463,6 +507,7 @@ class Orchestrator:
                 terminal_context="\n\n".join(
                     part for part in (terminal_evidence, current_attempt) if part
                 ),
+                run_brief=self._run_brief_text(task, include_outcomes=False),
             )
         except RuntimeError as e:
             log.warning("Planner validation rejected task %s because validation call failed: %s", task.id, e)
@@ -542,6 +587,23 @@ class Orchestrator:
                 error_text = validation_error
                 result_text = ""
 
+        # Evidence and facts are attached BEFORE the task is persisted below, so the
+        # stored task (and the HTML report) describe this attempt, not the last one.
+        step_log = getattr(self._executor, "_last_step_log", [])
+        terminal_evidence = self._format_terminal_evidence(task, step_log)
+        outcome = (
+            f"TASK OUTCOME {task.id}: status={status}\n"
+            f"task={task.description}\n"
+            f"result={result_text or '(none)'}\n"
+            f"error={error_text or '(none)'}"
+        )
+        task_context = "\n".join(part for part in (terminal_evidence, outcome) if part)
+        task.metadata["terminal_evidence"] = task_context
+        if status == "completed":
+            task.metadata["facts"] = extract_facts(step_log)
+        else:
+            task.metadata.pop("facts", None)
+
         if status == "completed":
             reasoning.info("Task %s succeeded: %s", task.id, result_text[:200] if result_text else "completed without additional output")
             self._manager.mark_completed(task, result_text)
@@ -560,25 +622,20 @@ class Orchestrator:
                     cfg.MAX_TASK_RETRIES,
                 )
 
-        terminal_evidence = self._format_terminal_evidence(
-            task,
-            getattr(self._executor, "_last_step_log", []),
-        )
-        outcome = (
-            f"TASK OUTCOME {task.id}: status={status}\n"
-            f"task={task.description}\n"
-            f"result={result_text or '(none)'}\n"
-            f"error={error_text or '(none)'}"
-        )
-        task_context = "\n".join(part for part in (terminal_evidence, outcome) if part)
         self._recent_terminal_context.append(task_context)
         self._recent_terminal_context = self._recent_terminal_context[-8:]
-        task.metadata["terminal_evidence"] = task_context
         self._publish_report()
 
     # ── Helpers ───────────────────────────────────────────────────────────
 
     def _enqueue_planner_tasks(self, raw_tasks: list[dict]):
+        reordered = order_app_files_before_dockerfile(raw_tasks)
+        if reordered is not raw_tasks:
+            reasoning.info(
+                "Reordered planned tasks so application files are written before the Dockerfile that copies them."
+            )
+            log.info("Reordered planner tasks: application files now precede the Dockerfile task.")
+        raw_tasks = reordered
         existing_descriptions = {
             t.description.strip().lower()
             for t in self._manager.queue_snapshot()

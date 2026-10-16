@@ -86,6 +86,7 @@ class Executor:
         self._auto_mode = False
         self._sudo_password: str | None = None
         self._system_context = ""
+        self._run_brief = ""
 
         log.info(
             "Executor ready — %s model=%s (tmux-driven)",
@@ -337,6 +338,10 @@ class Executor:
     def configure_control_plane(self, control_plane: ControlPlane, run_id: str) -> None:
         self._control_plane = control_plane
         self._control_run_id = run_id
+
+    def configure_run_brief(self, brief: str) -> None:
+        """Give the executor the shared plan/facts picture for the next task."""
+        self._run_brief = brief or ""
 
     def configure_input_modes(self, auto_mode: bool, sudo_password: str | None) -> None:
         self._auto_mode = auto_mode
@@ -693,6 +698,69 @@ class Executor:
         return False
 
     @staticmethod
+    def _command_signature(command: str) -> str:
+        """Group commands by what they do, so a retry can be matched to its failure.
+
+        ``docker build -t a /x`` and ``docker build -t a /x`` after a fix share a
+        signature; ``curl`` and ``docker ps`` do not.
+        """
+        text = (command or "").strip()
+        if text.startswith("<"):
+            return text
+        try:
+            tokens = shlex.split(text)
+        except ValueError:
+            tokens = text.split()
+        tokens = [t for t in tokens if t not in {"sudo", "-E"} and "=" not in t.split("/")[0]] or tokens
+        if not tokens:
+            return ""
+        if tokens[0] == "docker" and len(tokens) > 1 and not tokens[1].startswith("-"):
+            return f"docker {tokens[1]}"
+        return tokens[0]
+
+    @staticmethod
+    def _has_unresolved_failure(
+        step_log: list[dict] | None,
+        failure_markers: tuple[str, ...],
+        fallback_text: str,
+    ) -> bool:
+        """True when the task ended with a failure that was never recovered from.
+
+        A step fails when its exit code is non-zero or its output carries a
+        failure marker. A failure is *recovered* when a later step with the
+        same command signature succeeded (the executor fixed the problem and
+        re-ran it, e.g. a missing build-context directory followed by a
+        successful ``docker build``). Narration steps such as approval
+        requests are not command output and never count.
+        """
+        if not step_log:
+            return any(marker in fallback_text for marker in failure_markers)
+
+        def failed(step: dict) -> bool:
+            exit_code = step.get("exit_code")
+            output = str(step.get("output", "")).lower()
+            return (exit_code not in (None, 0)) or any(m in output for m in failure_markers)
+
+        steps = [
+            step for step in step_log
+            if isinstance(step, dict)
+            and not str(step.get("command", "")).lstrip().startswith("<human_input")
+        ]
+        for index, step in enumerate(steps):
+            if not failed(step):
+                continue
+            signature = Executor._command_signature(str(step.get("command", "")))
+            recovered = any(
+                not failed(later)
+                and later.get("exit_code") == 0
+                and Executor._command_signature(str(later.get("command", ""))) == signature
+                for later in steps[index + 1:]
+            )
+            if not recovered:
+                return True
+        return False
+
+    @staticmethod
     def validate_completion_status(
         status: str,
         result: str,
@@ -769,7 +837,7 @@ class Executor:
             "enter password",
             "overwrite existing",
         )
-        if any(marker in text for marker in failure_markers):
+        if Executor._has_unresolved_failure(step_log, failure_markers, text):
             return False
 
         if last_exit_code is not None and last_exit_code != 0:
@@ -1601,6 +1669,7 @@ class Executor:
             requires_file_write=self._requires_file_write(task.description),
             docker_setup=self._is_docker_setup_task(task.description),
             compose_requested=self._explicitly_requests_compose(task.description),
+            run_brief=getattr(self, "_run_brief", ""),
         )
 
         try:

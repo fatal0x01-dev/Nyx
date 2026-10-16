@@ -98,6 +98,7 @@ class Planner:
         remote_context: str = "",
         guidance_text: str = "",
         terminal_context: str = "",
+        run_brief: str = "",
     ) -> dict:
         """Return {action: accepted|rejected, ...} after validating a task result."""
         user_prompt = build_validation_prompt(
@@ -109,6 +110,7 @@ class Planner:
             remote_context=remote_context,
             guidance_text=guidance_text,
             terminal_context=terminal_context,
+            run_brief=run_brief,
         )
         raw = self._call_lmstudio_for_validation(user_prompt)
         result_json = parse_json_response(raw)
