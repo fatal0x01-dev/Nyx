@@ -47,7 +47,7 @@ class Orchestrator:
     def __init__(self):
         # ── Persistence ───────────────────────────────────────────────────
         self._store = TaskStore(cfg.TASK_DB_PATH)
-        self._rag = RAGStore()                  # stub in Phase 1
+        self._rag = RAGStore(cfg.RAG_DB_PATH)
 
         # ── Task management ───────────────────────────────────────────────
         self._manager = TaskManager(self._store)
@@ -64,6 +64,8 @@ class Orchestrator:
         self._remote_context: str = ""
         self._recent_terminal_context: list[str] = []
         self._safety_halt_reason: str = ""
+        self._environment_key = "local"
+        self._system_context: dict[str, str] = {}
         self._control = ControlPlane(cfg.CONTROL_DB_PATH)
         self._run_id: str = ""
 
@@ -82,6 +84,8 @@ class Orchestrator:
         self._start_time = time.time()
         self._recent_terminal_context = []
         self._safety_halt_reason = ""
+        self._environment_key = ssh_config.destination if ssh_config else "local"
+        self._system_context = {}
         self._run_id = new_id()
         self._control.start_run(self._run_id, goal)
         self._executor.configure_control_plane(self._control, self._run_id)
@@ -130,6 +134,17 @@ class Orchestrator:
             )
             self._publish_report()
             raise
+
+    @staticmethod
+    def _is_queue_management_task(description: str) -> bool:
+        text = description.lower()
+        return bool(
+            ("pending task" in text or "task queue" in text or "queued task" in text)
+            and any(
+                term in text
+                for term in ("update", "modify", "change", "rename", "reorder")
+            )
+        )
 
     # ── Pre-flight ────────────────────────────────────────────────────────
 
@@ -180,6 +195,14 @@ class Orchestrator:
 
     def _loop(self):
         while self._iteration < cfg.MAX_ITERATIONS:
+            try:
+                self._refresh_system_context()
+            except TmuxError as error:
+                message = f"Could not establish current system context: {error}"
+                log.error(message)
+                self._finish(success=False, message=message)
+                return
+
             guidance_text = self._checkpoint("Preparing planning cycle")
             self._iteration += 1
             self._control.update_run(
@@ -206,6 +229,7 @@ class Orchestrator:
                     remote_context=self._remote_context,
                     guidance_text=guidance_text,
                     terminal_context=self._terminal_context_text(),
+                    system_context=self._format_system_context(self._system_context),
                 )
             except RuntimeError as e:
                 log.error("Planner error: %s", e)
@@ -268,6 +292,10 @@ class Orchestrator:
                 phase="Executing task",
                 iteration=self._iteration,
                 current_task=task.description,
+            )
+            self._executor.configure_system_context(
+                self._format_system_context(self._system_context),
+                on_refresh=self._persist_system_context,
             )
             self._run_task(task)
             safety_halt_reason = getattr(self, "_safety_halt_reason", "")
@@ -358,7 +386,27 @@ class Orchestrator:
         )
 
     def _terminal_context_text(self) -> str:
-        return "\n\n".join(self._recent_terminal_context[-8:])[-12000:]
+        system_context = self._format_system_context(self._system_context)
+        sections = []
+        if system_context:
+            sections.append(f"CURRENT SYSTEM CONTEXT:\n{system_context}")
+        sections.extend(self._recent_terminal_context[-8:])
+        return "\n\n".join(sections)[-12000:]
+
+    @staticmethod
+    def _format_system_context(context: dict[str, str]) -> str:
+        return "\n".join(f"{key}: {value}" for key, value in context.items())
+
+    def _refresh_system_context(self) -> None:
+        observed_context = self._executor.capture_system_context()
+        self._persist_system_context(observed_context)
+
+    def _persist_system_context(self, context: dict[str, str]) -> None:
+        self._rag.save_system_context(self._environment_key, context)
+        stored_context = self._rag.get_system_context(self._environment_key)
+        if stored_context is None:
+            raise TmuxError("The live system context was not retrievable from RAG storage.")
+        self._system_context = stored_context
 
     @staticmethod
     def _format_terminal_evidence(task: Task, step_log: list[dict]) -> str:
@@ -521,6 +569,18 @@ class Orchestrator:
         for raw in raw_tasks:
             description = (raw.get("description") or "").strip()
             if not description:
+                continue
+            if self._is_queue_management_task(description):
+                message = (
+                    "Rejected planner task that tries to modify Nyx's internal task "
+                    "queue through shell commands. Queue changes are orchestrator-owned; "
+                    "return corrected task descriptions and paths in the plan."
+                )
+                reasoning.warning("%s: %s", description, message)
+                self._recent_terminal_context.append(
+                    f"PLANNER TASK REJECTED:\n{description}\n{message}"
+                )
+                self._recent_terminal_context = self._recent_terminal_context[-8:]
                 continue
             if description.lower() in existing_descriptions:
                 log.info("Skipping duplicate planner task already pending/running: %s", description)

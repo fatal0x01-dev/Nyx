@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import re
 import shlex
+from collections.abc import Callable
 
 import config.settings as cfg
 from executor.file_operations import (
@@ -84,6 +85,7 @@ class Executor:
         self._control_run_id: str | None = None
         self._auto_mode = False
         self._sudo_password: str | None = None
+        self._system_context = ""
 
         log.info(
             "Executor ready — %s model=%s (tmux-driven)",
@@ -340,6 +342,51 @@ class Executor:
         self._auto_mode = auto_mode
         self._sudo_password = sudo_password
         self._tmux.configure_input_modes(auto_mode)
+
+    def configure_system_context(
+        self,
+        system_context: str,
+        on_refresh: Callable[[dict[str, str]], None] | None = None,
+    ) -> None:
+        self._system_context = system_context
+        self._system_context_callback = on_refresh
+
+    def capture_system_context(self, target: str | None = None) -> dict[str, str]:
+        """Observe facts from the live shell Nyx will operate, not the local Python process."""
+        if target is None:
+            target = self._ssh_target
+        if target is None:
+            target, _ = self._tmux.get_target()
+        command = (
+            "printf 'current_directory=%s\\nhome_directory=%s\\nuser=%s\\nhostname=%s\\n"
+            "os_kernel=%s\\n' \"$(pwd -P)\" \"$HOME\" \"$(id -un)\" "
+            "\"$(hostname)\" \"$(uname -srm)\""
+        )
+        try:
+            result = self._tmux.run_command(target, command, timeout=20)
+        except TmuxError as error:
+            raise TmuxError(f"Could not capture live system context: {error}") from error
+        if result.get("timed_out") or result.get("exit_code") != 0:
+            raise TmuxError(
+                "Could not capture live system context: "
+                f"{str(result.get('output', '')).strip() or 'terminal command failed'}"
+            )
+        context: dict[str, str] = {}
+        for line in str(result.get("output", "")).splitlines():
+            key, separator, value = line.partition("=")
+            if separator and value.strip():
+                context[key.strip()] = value.strip()
+        required = {
+            "current_directory",
+            "home_directory",
+            "user",
+            "hostname",
+            "os_kernel",
+        }
+        if not required.issubset(context):
+            missing = ", ".join(sorted(required - context.keys()))
+            raise TmuxError(f"Live system context was incomplete; missing: {missing}")
+        return context
 
     def _control_checkpoint(self, task: Task, phase: str) -> str:
         if self._control_plane is None or self._control_run_id is None:
@@ -672,6 +719,20 @@ class Executor:
 
         text = "\n".join(part for part in evidence_parts if part).strip().lower()
 
+        if Executor._is_directory_creation_task(task_description or ""):
+            combined = f"{text}\n{result}".lower()
+            if Executor._directory_exists_conflict(combined):
+                return False
+            created_by_mkdir = any(
+                isinstance(step, dict)
+                and step.get("exit_code") == 0
+                and re.search(r"(?:^|\s)mkdir(?:\s|$)", str(step.get("command", "")))
+                for step in step_log or []
+            )
+            return created_by_mkdir and bool(
+                re.search(r"\bcreated\b", result, re.IGNORECASE)
+            )
+
         if task_description:
             task_lower = task_description.lower()
             if "nginx" in task_lower and "ubuntu" in text and "nginx" in text and "image: ubuntu" in text:
@@ -778,6 +839,20 @@ class Executor:
 
         for step in range(1, cfg.MAX_SHELL_STEPS_PER_TASK + 1):
             self._control_checkpoint(task, f"Ready for step {step}")
+            context_callback = getattr(self, "_system_context_callback", None)
+            if context_callback is not None:
+                try:
+                    context = self.capture_system_context(target)
+                except TmuxError as error:
+                    self._last_step_log = list(step_log)
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": str(error),
+                    }
+                self._system_context = self._format_system_context(context)
+                context_callback(context)
+
             if self._needs_write_before_retry(task.description, step_log):
                 log.warning(
                     "Task %s: validation was repeated without an intervening config-file write; stopping to avoid a loop.",
@@ -975,12 +1050,21 @@ class Executor:
                     "file_path": path,
                 })
                 self._last_step_log = list(step_log)
-                if write_result.get("timed_out") or write_result.get("exit_code") != 0:
+                if write_result.get("timed_out"):
                     return {
                         "status": "failed",
                         "result": "",
                         "error": f"Atomic write of {path} failed: {write_result.get('output', '')}",
                     }
+                if write_result.get("exit_code") != 0:
+                    step_log[-1]["output"] = (
+                        f"{step_log[-1]['output']}\n"
+                        f"Atomic write of {path} failed. Choose a corrected path "
+                        "using CURRENT SYSTEM CONTEXT; do not root relative project "
+                        "paths at /. Report a concrete blocker if no valid path exists."
+                    ).strip()
+                    self._last_step_log = list(step_log)
+                    continue
 
                 try:
                     verify_result = self._tmux.run_command(
@@ -1035,10 +1119,14 @@ class Executor:
                 if (
                     status == "completed"
                     and self._is_directory_creation_task(task.description)
-                    and any(
-                        self._directory_exists_conflict(str(entry.get("output", "")))
-                        for entry in step_log
-                        if isinstance(entry, dict)
+                    and self._directory_exists_conflict(
+                        str(action.get("result", ""))
+                        + "\n"
+                        + "\n".join(
+                            str(entry.get("output", ""))
+                            for entry in step_log
+                            if isinstance(entry, dict)
+                        )
                     )
                 ):
                     error = (
@@ -1495,6 +1583,7 @@ class Executor:
             max_steps=cfg.MAX_SHELL_STEPS_PER_TASK,
             remote_context=self._remote_context,
             guidance_text=guidance,
+            system_context=getattr(self, "_system_context", ""),
             requires_file_write=self._requires_file_write(task.description),
             docker_setup=self._is_docker_setup_task(task.description),
             compose_requested=self._explicitly_requests_compose(task.description),
@@ -1518,6 +1607,10 @@ class Executor:
             return None
 
         return parsed
+
+    @staticmethod
+    def _format_system_context(context: dict[str, str]) -> str:
+        return "\n".join(f"{key}: {value}" for key, value in context.items())
 
     def is_available(self) -> bool:
         return self._client.health_check()

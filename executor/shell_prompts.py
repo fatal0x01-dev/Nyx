@@ -57,6 +57,10 @@ Rules:
   write_file actions. For a Dockerfile task, read the exact Dockerfile path
   first (a missing-file result is normal), then write its complete contents
   with write_file before running Docker commands.
+- Use CURRENT SYSTEM CONTEXT as the source of truth for the host, user, home,
+  and working directory. Resolve relative paths from the reported working
+  directory and expand `~` to the reported home directory. Never turn a
+  relative project path into a path rooted at `/`.
 - For tasks that create a source, markup, or configuration file, generate the
   actual requested contents yourself and pass the complete contents to
   write_file. Do not substitute shell commands that only describe, print, or
@@ -128,6 +132,7 @@ def build_step_prompt(
     max_steps: int,
     remote_context: str = "",
     guidance_text: str = "",
+    system_context: str = "",
     requires_file_write: bool = False,
     docker_setup: bool = False,
     compose_requested: bool = False,
@@ -170,6 +175,8 @@ def build_step_prompt(
 TASK: {task_description}
 
 EXECUTION ENVIRONMENT: {remote_context or "Local terminal"}
+CURRENT SYSTEM CONTEXT:
+{system_context or "(not yet captured)"}
 
 {docker_setup_guidance}{file_write_guidance}USER GUIDANCE FOR THIS RUN:
 {guidance_text or "(none)"}

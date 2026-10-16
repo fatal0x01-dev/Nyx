@@ -41,6 +41,12 @@ You respond with a JSON object containing one of these actions:
 Rules:
 - Always respond with ONLY valid JSON. No preamble, no explanation, no markdown fences.
 - Priority 1 = highest priority, 10 = lowest.
+- Use the current system context (especially host, user, home, and current
+  directory) when choosing paths. Keep every task in a multi-step project
+  consistent with the same verified absolute project directory.
+- Do not create shell tasks to modify, rename, or reprioritize Nyx's pending
+  task queue. The orchestrator owns its task metadata; return corrected
+  descriptions and paths directly as planner tasks.
 - Task descriptions must be specific and actionable for an executor agent.
 - Only signal goal_complete when all objectives have been met based on the task history and there are no pending tasks remaining.
 - If any task is still pending or running, do not signal goal_complete; instead continue with create_tasks or another actionable step.
@@ -63,6 +69,11 @@ Rules:
   requested service/endpoint. Do not use Docker Compose unless the user
   explicitly requests Compose or a Compose file. A simple request to run an
   existing image may use `docker run` directly without building a custom image.
+- Keep setup tasks in dependency order: create and verify the project directory
+  before file writes; create files before image builds; build before container
+  runs; and run before endpoint verification. Do not schedule later tasks to
+  investigate unrelated host services such as Apache when the goal is a Docker
+  deployment.
 - For Docker port conflicts, change only the host-side published port
   (`HOST_PORT:CONTAINER_PORT`) and retry with a free alternate port. Do not
   investigate, stop, or reconfigure host Apache or other host services unless
@@ -123,6 +134,7 @@ def build_plan_prompt(
     remote_context: str = "",
     guidance_text: str = "",
     terminal_context: str = "",
+    system_context: str = "",
 ) -> str:
     pending_str = (
         "\n".join(
@@ -138,6 +150,9 @@ def build_plan_prompt(
 
 EXECUTION ENVIRONMENT:
 {remote_context or "Local terminal"}
+
+CURRENT SYSTEM CONTEXT:
+{system_context or "(not yet captured)"}
 
 USER GUIDANCE FOR THIS RUN:
 {guidance_text or "(none)"}

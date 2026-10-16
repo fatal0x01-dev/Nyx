@@ -1,4 +1,5 @@
 import base64
+import os
 import shlex
 import subprocess
 
@@ -13,12 +14,16 @@ from executor.file_operations import (
 )
 
 
-def _run_generated_command(command: str) -> subprocess.CompletedProcess[str]:
+def _run_generated_command(
+    command: str,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         shlex.split(command),
         capture_output=True,
         check=False,
         text=True,
+        env=env,
     )
 
 
@@ -61,6 +66,28 @@ def test_read_file_reports_missing_target_for_creation_tasks(tmp_path):
 
     assert result.returncode == 0
     assert result.stdout == MISSING_FILE_SENTINEL
+
+
+def test_file_operations_expand_home_relative_paths(tmp_path):
+    home = tmp_path / "remote-home"
+    project = home / "web-server"
+    project.mkdir(parents=True)
+    path = "~/web-server/Dockerfile"
+    contents = "FROM httpd:latest\n"
+    environment = {**os.environ, "HOME": str(home)}
+
+    write_result = _run_generated_command(
+        build_write_file_command(path, contents),
+        env=environment,
+    )
+    read_result = _run_generated_command(
+        build_read_file_command(path),
+        env=environment,
+    )
+
+    assert write_result.returncode == 0, write_result.stderr
+    assert read_result.returncode == 0, read_result.stderr
+    assert decode_read_file_output(read_result.stdout) == contents
 
 
 def test_write_file_refuses_symlink_target(tmp_path):

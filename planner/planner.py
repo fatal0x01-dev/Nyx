@@ -35,6 +35,7 @@ class Planner:
         remote_context: str = "",
         guidance_text: str = "",
         terminal_context: str = "",
+        system_context: str = "",
     ) -> dict:
         """
         Ask the planner what to do next.
@@ -55,6 +56,7 @@ class Planner:
             remote_context,
             guidance_text,
             terminal_context,
+            system_context,
         )
 
         log.debug("Planner prompt (user):\n%s", user_prompt[:600])

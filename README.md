@@ -58,8 +58,16 @@ The runtime is split into a few distinct layers:
 - Executor: chooses the next shell command and drives a real terminal session
 - TaskManager: priority-ordered queue backed by SQLite
 - History: keeps recent execution state for planning context
-- Memory: task store and retrieval layer, still lightweight compared to a full long-term memory system
+- Memory: SQLite task history plus persistent per-environment system observations
 - TmuxClient: uses tmux to attach to or create a live terminal session
+
+Before each planning cycle and executor decision, Nyx captures the active
+terminal's current directory, home directory, user, hostname, and OS/kernel.
+It stores and retrieves this snapshot from `data/rag_memory.db`, scoped
+separately for the local host and each SSH destination, then includes it in
+planner and executor context. `~` paths in dedicated file operations are
+expanded on the target system. Retries retain their planner-assigned priority
+so a failed prerequisite is retried before lower-priority dependent setup tasks.
 
 This is not a browser automation project, a web app, or a generic agent framework. It is a local command-execution agent that works against the terminal and filesystem you already use.
 

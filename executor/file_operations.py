@@ -9,7 +9,7 @@ MAX_FILE_BYTES = 48 * 1024
 MISSING_FILE_SENTINEL = "__NYX_FILE_MISSING__"
 
 READ_FILE_SCRIPT = """import base64, os, stat, sys
-path = sys.argv[1]
+path = os.path.expanduser(sys.argv[1])
 if os.path.islink(path):
     raise SystemExit("Refusing to read a symlink")
 if not os.path.exists(path):
@@ -30,7 +30,7 @@ sys.stdout.write(base64.b64encode(data).decode("ascii"))
 """
 
 WRITE_FILE_SCRIPT = """import base64, os, stat, sys, tempfile
-path = os.path.abspath(sys.argv[1])
+path = os.path.abspath(os.path.expanduser(sys.argv[1]))
 data = base64.b64decode(sys.argv[2], validate=True)
 if len(data) > 49152:
     raise SystemExit("File exceeds Nyx's 48 KiB text-file limit")

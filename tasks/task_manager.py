@@ -107,14 +107,13 @@ class TaskManager:
         return task
 
     def mark_retry(self, task: Task, error: str) -> Task:
-        """Increment retry counter, demote priority, and put the task back to PENDING."""
+        """Retry at the planner-assigned priority so prerequisites aren't bypassed."""
         task.retries += 1
         task.status = TaskStatus.PENDING
         task.error = error
-        task.priority = max(task.priority + 10, 10)
         self._store.update_task(task)
         self._queue.sort(key=lambda t: (t.priority, t.created_at))
-        log.warning("Retry   %s (attempt %d) priority=%d", task.summary(), task.retries, task.priority)
+        log.warning("Retry   %s (attempt %d)", task.summary(), task.retries)
         return task
 
     def has_pending(self) -> bool:

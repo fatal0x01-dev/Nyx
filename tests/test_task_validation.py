@@ -66,6 +66,35 @@ def test_orchestrator_rejects_goal_complete_when_pending_tasks_remain():
     ) is True
 
 
+def test_orchestrator_run_reaches_main_loop_after_startup(monkeypatch):
+    class FakeControl:
+        @staticmethod
+        def start_run(run_id, goal):
+            assert goal == "check the system"
+
+    class FakeExecutor:
+        @staticmethod
+        def configure_control_plane(control, run_id):
+            assert run_id
+
+        @staticmethod
+        def configure_input_modes(auto_mode, sudo_password):
+            assert auto_mode is False
+            assert sudo_password is None
+
+    orchestrator = Orchestrator.__new__(Orchestrator)
+    orchestrator._control = FakeControl()
+    orchestrator._executor = FakeExecutor()
+    loop_calls = []
+    monkeypatch.setattr(orchestrator, "_publish_report", lambda: None)
+    monkeypatch.setattr(orchestrator, "_preflight_checks", lambda: None)
+    monkeypatch.setattr(orchestrator, "_loop", lambda: loop_calls.append(True))
+
+    orchestrator.run("check the system")
+
+    assert loop_calls == [True]
+
+
 def test_retried_pending_tasks_are_not_treated_as_live_work_after_goal_confirmation():
     orchestrator = Orchestrator()
     stale_retry = Task(id="retry", description="verify internet connectivity", retries=1)
@@ -83,7 +112,7 @@ def test_retried_pending_tasks_are_not_treated_as_live_work_after_goal_confirmat
     ) is False
 
 
-def test_retry_demotes_a_failed_task_so_other_tasks_can_run():
+def test_retry_preserves_planner_priority_for_prerequisite_order():
     store = TaskStore(settings.TASK_DB_PATH)
     store.clear_all_tasks()
     manager = TaskManager(store)
@@ -95,8 +124,17 @@ def test_retry_demotes_a_failed_task_so_other_tasks_can_run():
 
     manager.mark_retry(first, "still failing")
 
-    assert first.priority > 1
-    assert manager.next_task().id == second.id
+    assert first.priority == 1
+    assert manager.next_task().id == first.id
+
+
+def test_planner_cannot_schedule_shell_changes_to_nyx_task_queue():
+    assert Orchestrator._is_queue_management_task(
+        "Update all pending tasks to use the new directory name"
+    )
+    assert not Orchestrator._is_queue_management_task(
+        "Create a Dockerfile in ~/web-server"
+    )
 
 
 def test_completion_validation_uses_only_current_task_output():
@@ -184,6 +222,7 @@ def test_executor_finishes_basic_connectivity_task_after_one_successful_ping(mon
     executor._control_run_id = None
     executor._auto_mode = False
     executor._sudo_password = None
+    executor._system_context = "current_directory: /home/kali\nhome_directory: /home/kali"
     monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
     monkeypatch.setattr(
         executor,
@@ -225,8 +264,28 @@ def test_successful_connectivity_probe_cancels_remaining_planned_tasks(tmp_path,
                 "output": "64 bytes from 8.8.8.8: icmp_seq=1 ttl=117 time=12 ms",
                 "exit_code": 0,
             }
-        ]
+        ],
+        capture_system_context=lambda: {
+            "current_directory": "/home/kali",
+            "home_directory": "/home/kali",
+            "user": "kali",
+            "hostname": "test-host",
+            "os_kernel": "Linux test",
+        },
+        configure_system_context=lambda context, **kwargs: None,
     )
+    orchestrator._rag = SimpleNamespace(
+        save_system_context=lambda key, context: None,
+        get_system_context=lambda key: {
+            "current_directory": "/home/kali",
+            "home_directory": "/home/kali",
+            "user": "kali",
+            "hostname": "test-host",
+            "os_kernel": "Linux test",
+        },
+    )
+    orchestrator._environment_key = "local"
+    orchestrator._system_context = {}
     orchestrator._planner = SimpleNamespace(
         plan=lambda **kwargs: {"action": "create_tasks", "tasks": []}
     )
@@ -627,6 +686,172 @@ def test_terminal_context_is_included_in_planner_prompt():
     )
 
     assert terminal_context in prompt
+
+
+def test_system_context_is_included_in_planner_and_executor_prompts():
+    context = {
+        "current_directory": "/home/kali",
+        "home_directory": "/home/kali",
+        "hostname": "kali-box",
+    }
+    formatted = "\n".join(f"{key}: {value}" for key, value in context.items())
+    planner_prompt = build_plan_prompt(
+        "Create a Docker web app",
+        "",
+        [],
+        system_context=formatted,
+    )
+    executor_prompt = build_step_prompt(
+        "dockerfile",
+        "Create a Dockerfile in the project directory",
+        [],
+        0,
+        12,
+        system_context=formatted,
+        requires_file_write=True,
+        docker_setup=True,
+    )
+
+    assert formatted in planner_prompt
+    assert formatted in executor_prompt
+    assert (
+        "never turn a relative project path into a path rooted at `/`"
+        in " ".join(EXECUTOR_SYSTEM_PROMPT.lower().split())
+    )
+
+
+def test_orchestrator_persists_live_system_context_in_rag_store():
+    saved = []
+    context = {
+        "current_directory": "/home/kali",
+        "home_directory": "/home/kali",
+        "user": "kali",
+        "hostname": "kali-box",
+        "os_kernel": "Linux 6.1 x86_64",
+    }
+    orchestrator = Orchestrator.__new__(Orchestrator)
+    orchestrator._executor = SimpleNamespace(
+        capture_system_context=lambda: context,
+    )
+    orchestrator._rag = SimpleNamespace(
+        save_system_context=lambda key, value: saved.append((key, value)),
+        get_system_context=lambda key: context,
+    )
+    orchestrator._environment_key = "kali@192.0.2.8"
+    orchestrator._system_context = {}
+
+    orchestrator._refresh_system_context()
+
+    assert orchestrator._system_context == context
+    assert saved == [("kali@192.0.2.8", context)]
+
+
+def test_executor_refreshes_context_between_model_decisions(monkeypatch):
+    class FakeTmux:
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+        @staticmethod
+        def run_command(target, command, timeout, **kwargs):
+            if "current_directory=%s" in command:
+                return {
+                    "output": (
+                        "current_directory=/home/kali/project\n"
+                        "home_directory=/home/kali\n"
+                        "user=kali\n"
+                        "hostname=kali-box\n"
+                        "os_kernel=Linux 6.1 x86_64"
+                    ),
+                    "exit_code": 0,
+                    "timed_out": False,
+                }
+            return {"output": "command completed", "exit_code": 0, "timed_out": False}
+
+    executor = _make_executor_for_actions(
+        [
+            {"action": "run_command", "command": "true"},
+            {"action": "done", "status": "completed", "result": "Operation completed."},
+        ],
+        FakeTmux(),
+    )
+    stored_contexts = []
+    executor.configure_system_context(
+        "",
+        on_refresh=lambda context: stored_contexts.append(context.copy()),
+    )
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+
+    result = executor.execute(Task(id="refresh-context", description="Run a safe command"))
+
+    assert result["status"] == "completed"
+    assert len(stored_contexts) == 2
+    assert all(
+        context["current_directory"] == "/home/kali/project"
+        for context in stored_contexts
+    )
+
+
+def test_executor_captures_context_from_live_tmux_shell():
+    class FakeTmux:
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+        @staticmethod
+        def run_command(target, command, timeout):
+            assert target == "nyx:0.0"
+            assert "current_directory=%s" in command
+            return {
+                "output": (
+                    "current_directory=/home/kali/projects\n"
+                    "home_directory=/home/kali\n"
+                    "user=kali\n"
+                    "hostname=kali-box\n"
+                    "os_kernel=Linux 6.1 x86_64"
+                ),
+                "exit_code": 0,
+                "timed_out": False,
+            }
+
+    executor = Executor.__new__(Executor)
+    executor._tmux = FakeTmux()
+    executor._ssh_target = None
+
+    assert executor.capture_system_context() == {
+        "current_directory": "/home/kali/projects",
+        "home_directory": "/home/kali",
+        "user": "kali",
+        "hostname": "kali-box",
+        "os_kernel": "Linux 6.1 x86_64",
+    }
+
+
+def test_directory_creation_completion_requires_successful_mkdir_evidence():
+    assert Executor.validate_completion_status(
+        status="completed",
+        result="Directory web-server-1 created.",
+        error="",
+        last_exit_code=None,
+        step_log=[{
+            "command": "mkdir ~/web-server-1",
+            "output": "",
+            "exit_code": 0,
+        }],
+        task_description="Create the directory ~/web-server-1",
+    )
+    assert not Executor.validate_completion_status(
+        status="completed",
+        result="Directory web-server-1 already exists.",
+        error="",
+        last_exit_code=None,
+        step_log=[{
+            "command": "mkdir -p ~/web-server-1",
+            "output": "",
+            "exit_code": 0,
+        }],
+        task_description="Create the directory ~/web-server-1",
+    )
 
 
 def test_orchestrator_formats_terminal_command_evidence():
@@ -1301,6 +1526,7 @@ def _make_executor_for_actions(actions, tmux):
     executor._remote_context = ""
     executor._control_plane = None
     executor._control_run_id = None
+    executor._system_context = "current_directory: /home/kali\nhome_directory: /home/kali"
     action_iter = iter(actions)
     executor._decide_next_action = lambda task, step_log, step: next(action_iter)
     return executor
@@ -1546,7 +1772,27 @@ def test_orchestrator_stops_run_after_high_risk_command_is_blocked(tmp_path, mon
             "exit_code": None,
             "timed_out": False,
         }],
+        capture_system_context=lambda: {
+            "current_directory": "/root",
+            "home_directory": "/root",
+            "user": "root",
+            "hostname": "test-host",
+            "os_kernel": "Linux test",
+        },
+        configure_system_context=lambda context, **kwargs: None,
     )
+    orchestrator._rag = SimpleNamespace(
+        save_system_context=lambda key, context: None,
+        get_system_context=lambda key: {
+            "current_directory": "/root",
+            "home_directory": "/root",
+            "user": "root",
+            "hostname": "test-host",
+            "os_kernel": "Linux test",
+        },
+    )
+    orchestrator._environment_key = "local"
+    orchestrator._system_context = {}
     plan_calls = []
 
     def create_dangerous_task(**kwargs):
@@ -1710,6 +1956,71 @@ def test_executor_recovers_from_write_before_read_by_reading_exact_path(monkeypa
     assert "Read other.py successfully before writing it" in executor._last_step_log[0]["output"]
     assert executor._last_step_log[1]["file_operation"] == "read"
     assert executor._last_step_log[2]["file_operation"] == "write"
+
+
+def test_executor_recovers_from_wrong_root_path_after_write_error(monkeypatch):
+    content = "FROM httpd:latest\n"
+
+    class FakeTmux:
+        def __init__(self):
+            self.commands = []
+
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+        def run_command(self, target, command, timeout, **kwargs):
+            self.commands.append(command)
+            if len(self.commands) in {1, 3}:
+                return {
+                    "output": MISSING_FILE_SENTINEL,
+                    "exit_code": 0,
+                    "timed_out": False,
+                }
+            if len(self.commands) == 2:
+                return {
+                    "output": "Parent directory does not exist",
+                    "exit_code": 1,
+                    "timed_out": False,
+                }
+            if len(self.commands) == 4:
+                return {
+                    "output": "Atomic file replacement completed",
+                    "exit_code": 0,
+                    "timed_out": False,
+                }
+            return {
+                "output": base64.b64encode(content.encode()).decode(),
+                "exit_code": 0,
+                "timed_out": False,
+            }
+
+    tmux = FakeTmux()
+    actions = iter([
+        {"action": "read_file", "path": "/web-server-1/Dockerfile"},
+        {"action": "write_file", "path": "/web-server-1/Dockerfile", "content": content},
+        {"action": "read_file", "path": "~/web-server-1/Dockerfile"},
+        {"action": "write_file", "path": "~/web-server-1/Dockerfile", "content": content},
+        {"action": "done", "status": "completed", "result": "Created the Dockerfile."},
+    ])
+    seen_steps = []
+    executor = _make_executor_for_actions([], tmux)
+    executor._decide_next_action = (
+        lambda task, step_log, step: seen_steps.append(list(step_log)) or next(actions)
+    )
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+
+    result = executor.execute(
+        Task(
+            id="dockerfile-recover",
+            description="Create a Dockerfile for an Apache Docker container",
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert len(tmux.commands) == 5
+    assert "Parent directory does not exist" in seen_steps[2][1]["output"]
+    assert "do not root relative project paths at /" in seen_steps[2][1]["output"]
 
 
 def test_docker_setup_rejects_compose_file_write_unless_requested(monkeypatch):
