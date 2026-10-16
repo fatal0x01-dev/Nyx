@@ -18,8 +18,12 @@ from utils.tmux_client import TmuxClient
 from utils.ssh import SSHConfig, build_ssh_command
 from utils.tmux_client import TmuxError
 from utils.control_plane import ControlPlane
-from executor.shell_prompts import build_step_prompt
-from planner.prompts import SYSTEM_PROMPT as PLANNER_SYSTEM_PROMPT, build_plan_prompt
+from executor.shell_prompts import SYSTEM_PROMPT as EXECUTOR_SYSTEM_PROMPT, build_step_prompt
+from planner.prompts import (
+    SYSTEM_PROMPT as PLANNER_SYSTEM_PROMPT,
+    VALIDATION_SYSTEM_PROMPT,
+    build_plan_prompt,
+)
 from planner.planner import Planner
 
 
@@ -311,6 +315,16 @@ def test_user_guidance_is_included_in_planner_and_executor_prompts():
 
     assert guidance in plan_prompt
     assert guidance in executor_prompt
+
+
+def test_active_prompts_describe_nyx_as_goal_oriented_not_repair_only():
+    assert "inspection, setup, operation, content creation, or configuration changes" in PLANNER_SYSTEM_PROMPT
+    assert "do not assume the user is asking to diagnose or repair a problem" in PLANNER_SYSTEM_PROMPT
+    assert "requested outcome, not an assumed repair workflow" in PLANNER_SYSTEM_PROMPT
+    assert "specific requested task" in VALIDATION_SYSTEM_PROMPT
+    assert "inspect, set up, operate, create, or configure" in VALIDATION_SYSTEM_PROMPT
+    assert "carry out the user's" in EXECUTOR_SYSTEM_PROMPT
+    assert "do not assume every task is troubleshooting or repair" in EXECUTOR_SYSTEM_PROMPT
 
 
 def test_file_creation_task_prompt_requires_generated_contents_and_verified_write():

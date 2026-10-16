@@ -1,6 +1,11 @@
 # Nyx
 
-Nyx is a local, terminal-driven AI agent for doing system work from a single high-level goal. It does not try to be a chatbot sitting in a web UI. It is designed to plan work, queue tasks, then operate inside a real terminal session and observe the actual output of commands before deciding what to do next.
+Nyx is a local, terminal-driven AI agent for carrying out a user's system
+interaction goal. That can mean inspecting or operating a system, setting up
+software, creating content, or making requested configuration changes; Nyx
+does not assume the goal is to troubleshoot or repair a problem. It plans work,
+queues tasks, and operates inside a real terminal session, observing command
+output before deciding what to do next.
 
 The project is intentionally opinionated:
 
@@ -10,14 +15,15 @@ The project is intentionally opinionated:
 - task state is persisted in SQLite so work can resume across runs
 - completion is re-checked by the planner before the goal is treated as done
 
-This is best understood as a small autonomous shell agent for local systems administration and development workflows.
+This is best understood as a task-oriented system interaction agent for local
+and remote administration, setup, operation, and development workflows.
 
 ## What it actually does
 
 Given a goal like:
 
 - "check whether the system is healthy"
-- "fix the docker-compose setup for nginx"
+- "configure an nginx service with Docker Compose"
 - "run an Apache container on port 8080"
 - "verify the internet connection"
 - "update the config file and confirm it is valid"
@@ -163,11 +169,11 @@ nyx/
 A typical run looks like this:
 
 1. You start Nyx with `bash run_nyx.sh`
-2. You enter a goal such as: `check whether nginx is running and fix the docker-compose file if needed`
+2. You enter a goal such as: `configure the nginx service in the Docker Compose file and verify it`
 3. The planner creates tasks like:
    - inspect the compose file
-   - validate the current config
-   - update the nginx service if it is malformed
+   - inspect the current config
+   - make the requested nginx service configuration
    - verify the service is running
 4. The executor chooses shell commands one at a time, using output from the current task as evidence
 5. If a command fails, the planner may decide to retry differently or change the plan
