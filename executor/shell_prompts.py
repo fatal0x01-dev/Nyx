@@ -93,6 +93,11 @@ Rules:
 - Do not run `newgrp`; it opens an interactive subshell. Use `sg <group> -c
   '<command>'` for one command, or reconnect the user session to activate new
   group membership.
+- For Docker setup tasks, prefer a goal-matched `docker run` command rather
+  than creating a docker-compose.yml file. Use Docker Compose only when the
+  task explicitly requests it. If the task explicitly requests a Dockerfile,
+  Compose file, or another Docker configuration file, create/edit it through
+  read_file and write_file, then verify the resulting file.
 - If you've made no progress after several attempts, declare "failed" rather
   than looping.
 - Only declare "completed" when the terminal output actually confirms it —
@@ -109,6 +114,8 @@ def build_step_prompt(
     remote_context: str = "",
     guidance_text: str = "",
     requires_file_write: bool = False,
+    docker_setup: bool = False,
+    compose_requested: bool = False,
 ) -> str:
     log_text = (
         "\n".join(
@@ -129,13 +136,24 @@ def build_step_prompt(
         if requires_file_write
         else ""
     )
+    docker_setup_guidance = (
+        (
+            "THIS IS A DOCKER SETUP TASK. Prefer a single goal-matched "
+            "`docker run` command; do not create or use a docker-compose.yml "
+            "unless the task explicitly requests Docker Compose. If the task "
+            "requires a Docker configuration file, create its complete contents "
+            "with write_file after reading the exact path.\n\n"
+        )
+        if docker_setup and not compose_requested
+        else ""
+    )
 
     return f"""TASK ID: {task_id}
 TASK: {task_description}
 
 EXECUTION ENVIRONMENT: {remote_context or "Local terminal"}
 
-{file_write_guidance}USER GUIDANCE FOR THIS RUN:
+{docker_setup_guidance}{file_write_guidance}USER GUIDANCE FOR THIS RUN:
 {guidance_text or "(none)"}
 
 COMMANDS RUN SO FAR THIS TASK ({steps_taken}/{max_steps}):

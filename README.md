@@ -18,6 +18,7 @@ Given a goal like:
 
 - "check whether the system is healthy"
 - "fix the docker-compose setup for nginx"
+- "run an Apache container on port 8080"
 - "verify the internet connection"
 - "update the config file and confirm it is valid"
 
@@ -31,6 +32,14 @@ Nyx will:
 6. inspect command output, decide whether the task is complete or failed
 7. retry or re-plan when needed
 8. only mark a goal as finished when the planner confirms the task queue is empty and the outcome is valid
+
+## Docker setup
+
+For Docker setup goals, Nyx prefers a goal-matched `docker run` command rather
+than creating a Compose project. It uses Docker Compose only when the goal
+explicitly requests Compose or a Compose file. If a Dockerfile, Compose file,
+or other Docker configuration file is explicitly required, Nyx creates or
+updates it through the verified `read_file`/`write_file` workflow.
 
 ## Core design
 

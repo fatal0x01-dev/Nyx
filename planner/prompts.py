@@ -42,6 +42,12 @@ Rules:
 - If recent tasks have failed, decide whether to retry differently or give up.
 - Do not create duplicate tasks for work already pending, running, or completed successfully.
 - Treat user guidance as additional direction for this run, while preserving the stated goal and safety rules.
+- For Docker setup goals, plan toward a goal-matched `docker run` command by
+  default; do not plan to create or run a docker-compose.yml. Use Docker
+  Compose only if the user explicitly asks for Compose or a Compose file.
+  When the goal explicitly requires a Dockerfile or other Docker configuration
+  file, make it a file-edit task so the executor uses its verified
+  read_file/write_file workflow.
 - Use recent terminal output as direct evidence of what commands actually did; do not infer success from a task description alone.
 - Prefer the most recent relevant output over older or contradictory terminal evidence.
 - For a goal that only asks to establish/check basic network or internet connectivity,

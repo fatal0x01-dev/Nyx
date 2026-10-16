@@ -331,6 +331,100 @@ def test_file_creation_task_prompt_requires_generated_contents_and_verified_writ
     assert "write_file with those contents" in prompt
 
 
+def test_docker_setup_prompt_prefers_docker_run_unless_compose_was_requested():
+    prompt = build_step_prompt(
+        task_id="run-web",
+        task_description="Configure an Apache Docker container and expose port 8080",
+        step_log=[],
+        steps_taken=0,
+        max_steps=12,
+        docker_setup=Executor._is_docker_setup_task(
+            "Configure an Apache Docker container and expose port 8080"
+        ),
+        compose_requested=Executor._explicitly_requests_compose(
+            "Configure an Apache Docker container and expose port 8080"
+        ),
+    )
+
+    assert "THIS IS A DOCKER SETUP TASK" in prompt
+    assert "single goal-matched `docker run` command" in prompt
+    assert Executor._is_docker_setup_task(
+        "Configure an Apache Docker container and expose port 8080"
+    )
+    assert not Executor._explicitly_requests_compose(
+        "Configure an Apache Docker container and expose port 8080"
+    )
+    assert Executor._explicitly_requests_compose(
+        "Create a docker-compose.yml for Apache"
+    )
+    assert Executor._requires_file_write("Create a Dockerfile for Apache")
+
+    compose_prompt = build_step_prompt(
+        task_id="compose-apache",
+        task_description="Create a docker-compose.yml for Apache",
+        step_log=[],
+        steps_taken=0,
+        max_steps=12,
+        requires_file_write=True,
+        docker_setup=True,
+        compose_requested=True,
+    )
+    assert "THIS IS A FILE-CREATION OR FILE-EDIT TASK" in compose_prompt
+    assert "THIS IS A DOCKER SETUP TASK" not in compose_prompt
+
+
+def test_docker_compose_invocation_is_distinguished_and_compose_file_edits_are_detected():
+    assert Executor._is_compose_command("docker-compose up -d")
+    assert Executor._is_compose_command("docker compose up -d")
+    assert not Executor._is_compose_command("docker run -d -p 8080:80 httpd")
+    assert Executor._is_compose_file_write_command(
+        "cat > docker-compose.yml <<'EOF'\nservices: {}\nEOF"
+    )
+    assert not Executor._is_compose_file_write_command(
+        "cat > Dockerfile <<'EOF'\nFROM httpd\nEOF"
+    )
+
+
+def test_docker_setup_rejects_compose_and_continues_with_docker_run(monkeypatch):
+    class FakeTmux:
+        def __init__(self):
+            self.commands = []
+
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+        def run_command(self, target, command, timeout, **kwargs):
+            self.commands.append(command)
+            return {
+                "output": "container started",
+                "exit_code": 0,
+                "timed_out": False,
+            }
+
+    tmux = FakeTmux()
+    executor = _make_executor_for_actions(
+        [
+            {"action": "run_command", "command": "docker compose up -d"},
+            {"action": "run_command", "command": "docker run -d -p 8080:80 httpd"},
+            {"action": "done", "status": "completed", "result": "Apache container started."},
+        ],
+        tmux,
+    )
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+
+    result = executor.execute(
+        Task(
+            id="apache-container",
+            description="Configure an Apache Docker container and expose port 8080",
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert tmux.commands == ["docker run -d -p 8080:80 httpd"]
+    assert executor._last_step_log[0]["policy_blocked"] is True
+
+
 def test_terminal_context_is_included_in_planner_prompt():
     terminal_context = "$ ping -c 1 8.8.8.8\n64 bytes from 8.8.8.8\nexit_code=0"
     prompt = build_plan_prompt(

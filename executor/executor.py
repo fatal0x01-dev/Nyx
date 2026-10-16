@@ -354,6 +354,66 @@ class Executor:
         return True
 
     @staticmethod
+    def _is_docker_setup_task(task_description: str) -> bool:
+        text = (task_description or "").lower()
+        return "docker" in text and any(
+            term in text
+            for term in (
+                "setup",
+                "set up",
+                "configure",
+                "container",
+                "deploy",
+                "run ",
+                "launch",
+                "start",
+            )
+        )
+
+    @staticmethod
+    def _explicitly_requests_compose(task_description: str) -> bool:
+        text = (task_description or "").lower()
+        return bool(
+            re.search(r"\bdocker[- ]compose\b", text)
+            or re.search(r"\bcompose(?:\.ya?ml)?\s+file\b", text)
+            or re.search(r"\bcompose\.ya?ml\b", text)
+        )
+
+    @staticmethod
+    def _is_compose_command(command: str) -> bool:
+        try:
+            tokens = shlex.split(command, posix=True)
+        except ValueError:
+            return False
+        for index, token in enumerate(tokens):
+            executable = token.rsplit("/", 1)[-1].lower()
+            if executable == "docker-compose":
+                return True
+            if (
+                executable == "docker"
+                and index + 1 < len(tokens)
+                and tokens[index + 1].lower() == "compose"
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _is_compose_file_write_command(command: str) -> bool:
+        if not Executor._is_file_write_command(command):
+            return False
+        try:
+            tokens = shlex.split(command, posix=True)
+        except ValueError:
+            return False
+        compose_files = {
+            "compose.yml",
+            "compose.yaml",
+            "docker-compose.yml",
+            "docker-compose.yaml",
+        }
+        return any(token.rsplit("/", 1)[-1].lower() in compose_files for token in tokens)
+
+    @staticmethod
     def _requires_file_write(task_description: str) -> bool:
         text = (task_description or "").lower()
         file_markers = (
@@ -362,6 +422,8 @@ class Executor:
             "configuration",
             "config file",
             "docker-compose.yml",
+            "dockerfile",
+            "compose file",
             ".py",
             ".js",
             ".ts",
@@ -379,7 +441,16 @@ class Executor:
             ".service",
             ".txt",
         )
-        write_markers = ("write", "create", "fix", "update", "rewrite", "repair", "edit")
+        write_markers = (
+            "write",
+            "create",
+            "fix",
+            "update",
+            "rewrite",
+            "repair",
+            "edit",
+            "configure",
+        )
         return any(marker in text for marker in file_markers) and any(marker in text for marker in write_markers)
 
     @staticmethod
@@ -962,6 +1033,31 @@ class Executor:
                     step_log.append({"command": "", "output": "(empty command skipped)", "exit_code": None, "timed_out": False})
                     continue
 
+                if (
+                    self._is_docker_setup_task(task.description)
+                    and not self._explicitly_requests_compose(task.description)
+                    and (
+                        self._is_compose_command(command)
+                        or self._is_compose_file_write_command(command)
+                    )
+                ):
+                    message = (
+                        "This Docker setup task did not request Docker Compose. "
+                        "Use a goal-matched `docker run` command instead. Do not "
+                        "create a Compose file for this task. If a Docker configuration "
+                        "file is explicitly required, create it through read_file/write_file."
+                    )
+                    log.warning("Task %s: %s", task.id, message)
+                    step_log.append({
+                        "command": command,
+                        "output": message,
+                        "exit_code": None,
+                        "timed_out": False,
+                        "policy_blocked": True,
+                    })
+                    self._last_step_log = list(step_log)
+                    continue
+
                 if self._requires_file_write(task.description):
                     if self._is_file_write_command(command):
                         return {
@@ -1172,6 +1268,8 @@ class Executor:
             remote_context=self._remote_context,
             guidance_text=guidance,
             requires_file_write=self._requires_file_write(task.description),
+            docker_setup=self._is_docker_setup_task(task.description),
+            compose_requested=self._explicitly_requests_compose(task.description),
         )
 
         try:
