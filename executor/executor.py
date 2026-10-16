@@ -60,6 +60,11 @@ class Executor:
         "man": "Use `command --help` or read the relevant documentation non-interactively.",
         "more": "Use `cat`, `sed -n`, or `head` for non-interactive output.",
         "nano": "Use a non-interactive file-edit command, or request human input.",
+        "newgrp": (
+            "It opens an interactive subshell that Nyx cannot safely control. "
+            "Use `sg docker -c '<command>'` for one command, or reconnect the "
+            "user session to activate updated group membership."
+        ),
         "vi": "Use a non-interactive file-edit command, or request human input.",
         "vim": "Use a non-interactive file-edit command, or request human input.",
         "watch": "Run the watched command once without `watch`.",
@@ -1166,6 +1171,7 @@ class Executor:
             max_steps=cfg.MAX_SHELL_STEPS_PER_TASK,
             remote_context=self._remote_context,
             guidance_text=guidance,
+            requires_file_write=self._requires_file_write(task.description),
         )
 
         try:

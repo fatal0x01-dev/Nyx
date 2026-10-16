@@ -49,6 +49,10 @@ Rules:
   changes in memory, then replace it once with write_file. Do not use sed,
   echo, printf, tee, or shell redirection to modify files. Nyx verifies the
   replacement by reading the complete file back.
+- For tasks that create a source, markup, or configuration file, generate the
+  actual requested contents yourself and pass the complete contents to
+  write_file. Do not substitute shell commands that only describe, print, or
+  validate the intended file.
 - File editing is limited to UTF-8 text files no larger than 48 KiB. If a file
   is larger, binary, a symlink, or cannot be read completely, stop and report
   that limitation instead of falling back to shell editing.
@@ -86,6 +90,9 @@ Rules:
   remediation for a connectivity goal unless the user explicitly requested
   repair. A successful ping is sufficient proof for a basic connectivity goal.
 - Use `systemctl --no-pager status ...` so service status checks do not open a pager.
+- Do not run `newgrp`; it opens an interactive subshell. Use `sg <group> -c
+  '<command>'` for one command, or reconnect the user session to activate new
+  group membership.
 - If you've made no progress after several attempts, declare "failed" rather
   than looping.
 - Only declare "completed" when the terminal output actually confirms it —
@@ -101,6 +108,7 @@ def build_step_prompt(
     max_steps: int,
     remote_context: str = "",
     guidance_text: str = "",
+    requires_file_write: bool = False,
 ) -> str:
     log_text = (
         "\n".join(
@@ -112,13 +120,22 @@ def build_step_prompt(
         if step_log
         else "  (none yet — this is your first command for this task)"
     )
+    file_write_guidance = (
+        "THIS IS A FILE-CREATION OR FILE-EDIT TASK. Identify the exact target "
+        "path from the task, read it with read_file (a missing-file result is "
+        "expected for a new file), generate the complete requested source "
+        "contents yourself, then use write_file with those contents. Do not "
+        "mark this task complete without a verified write.\n\n"
+        if requires_file_write
+        else ""
+    )
 
     return f"""TASK ID: {task_id}
 TASK: {task_description}
 
 EXECUTION ENVIRONMENT: {remote_context or "Local terminal"}
 
-USER GUIDANCE FOR THIS RUN:
+{file_write_guidance}USER GUIDANCE FOR THIS RUN:
 {guidance_text or "(none)"}
 
 COMMANDS RUN SO FAR THIS TASK ({steps_taken}/{max_steps}):

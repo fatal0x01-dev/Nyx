@@ -312,6 +312,25 @@ def test_user_guidance_is_included_in_planner_and_executor_prompts():
     assert guidance in executor_prompt
 
 
+def test_file_creation_task_prompt_requires_generated_contents_and_verified_write():
+    prompt = build_step_prompt(
+        task_id="create-login",
+        task_description=(
+            "Create a static .html file named login.html with a simple login form"
+        ),
+        step_log=[],
+        steps_taken=0,
+        max_steps=12,
+        requires_file_write=Executor._requires_file_write(
+            "Create a static .html file named login.html with a simple login form"
+        ),
+    )
+
+    assert "THIS IS A FILE-CREATION OR FILE-EDIT TASK" in prompt
+    assert "generate the complete requested source contents yourself" in prompt
+    assert "write_file with those contents" in prompt
+
+
 def test_terminal_context_is_included_in_planner_prompt():
     terminal_context = "$ ping -c 1 8.8.8.8\n64 bytes from 8.8.8.8\nexit_code=0"
     prompt = build_plan_prompt(
@@ -819,6 +838,12 @@ def test_executor_normalizes_top_and_rejects_interactive_commands():
     assert error and "top -b -n 1" in error
     assert Executor._normalize_noninteractive_command("tail -f /var/log/syslog")[1] is not None
     assert Executor._normalize_noninteractive_command("journalctl -f")[1] is not None
+    newgrp_command, newgrp_error = Executor._normalize_noninteractive_command(
+        "newgrp docker"
+    )
+    assert newgrp_command == "newgrp docker"
+    assert newgrp_error and "interactive subshell" in newgrp_error
+    assert "sg docker -c" in newgrp_error
     assert Executor._normalize_noninteractive_command("ping 8.8.8.8") == (
         "ping -c 1 8.8.8.8",
         None,
@@ -1151,6 +1176,9 @@ def test_file_edit_tasks_refuse_non_write_actions():
 def test_file_task_detection_and_shell_edits_are_routed_to_file_actions():
     assert Executor._requires_file_write("Update src/service.py")
     assert Executor._requires_file_write("Create a new text file")
+    assert Executor._requires_file_write(
+        "Create a static .html file named login.html with a simple login form"
+    )
     assert Executor._is_file_write_command("sed -i 's/old/new/' config.py")
     assert Executor._is_file_write_command("echo 'new value' > config.ini")
     assert Executor._is_file_write_command("printf 'first\\nsecond\\n' >> app.txt")
