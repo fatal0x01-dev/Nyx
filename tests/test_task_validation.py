@@ -737,6 +737,114 @@ def test_executor_never_sends_blocked_partition_command_to_tmux(monkeypatch):
     assert executor._last_step_log[0]["safety_blocked"] is True
 
 
+def _make_executor_for_actions(actions, tmux):
+    executor = Executor.__new__(Executor)
+    executor._tmux = tmux
+    executor._last_step_log = []
+    executor._ssh_target = None
+    executor._remote_context = ""
+    executor._control_plane = None
+    executor._control_run_id = None
+    action_iter = iter(actions)
+    executor._decide_next_action = lambda task, step_log, step: next(action_iter)
+    return executor
+
+
+def test_model_approval_is_not_sent_as_terminal_keystrokes(monkeypatch):
+    class FakeTmux:
+        def __init__(self):
+            self.sent_keys = []
+
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+        def send_raw_keys(self, target, keys):
+            self.sent_keys.append((target, keys))
+
+    tmux = FakeTmux()
+    executor = _make_executor_for_actions(
+        [
+            {
+                "action": "human_input",
+                "kind": "approval",
+                "prompt": "Do you want to run fdisk with sudo?",
+            },
+            {"action": "done", "status": "completed", "result": "Finished safely."},
+        ],
+        tmux,
+    )
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+    monkeypatch.setattr(
+        "executor.executor.request_human_input",
+        lambda kind, prompt: "yes",
+    )
+
+    result = executor.execute(Task(id="approval", description="Inspect disk layout"))
+
+    assert result["status"] == "completed"
+    assert tmux.sent_keys == []
+    assert executor._last_step_log == [{
+        "command": "<human_input approval>",
+        "output": "User approved: Do you want to run fdisk with sudo?",
+        "exit_code": None,
+        "timed_out": False,
+    }]
+
+
+def test_repeated_model_approval_request_stops_without_reprompting(monkeypatch):
+    class FakeTmux:
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+        @staticmethod
+        def send_raw_keys(target, keys):
+            pytest.fail("model-requested approval must not be sent to the terminal")
+
+    prompt_calls = []
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+    monkeypatch.setattr(
+        "executor.executor.request_human_input",
+        lambda kind, prompt: prompt_calls.append(prompt) or "yes",
+    )
+    executor = _make_executor_for_actions(
+        [
+            {"action": "human_input", "kind": "approval", "prompt": "Run with sudo?"},
+            {"action": "human_input", "kind": "approval", "prompt": "Run with sudo?"},
+        ],
+        FakeTmux(),
+    )
+
+    result = executor.execute(Task(id="repeat-approval", description="Inspect disk"))
+
+    assert result["status"] == "failed"
+    assert "requested approval more than once" in result["error"]
+    assert prompt_calls == ["Run with sudo?"]
+
+
+def test_model_requested_credential_is_not_typed_into_terminal(monkeypatch):
+    class FakeTmux:
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+        @staticmethod
+        def send_raw_keys(target, keys):
+            pytest.fail("model-requested credentials must not be typed into the terminal")
+
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+    executor = _make_executor_for_actions(
+        [{"action": "human_input", "kind": "credential", "prompt": "Enter password"}],
+        FakeTmux(),
+    )
+
+    result = executor.execute(Task(id="credential", description="Inspect service"))
+
+    assert result["status"] == "failed"
+    assert "will not type model-requested credentials" in result["error"]
+
+
 def test_orchestrator_stops_run_after_high_risk_command_is_blocked(tmp_path, monkeypatch):
     store = TaskStore(str(tmp_path / "tasks.db"))
     control = ControlPlane(str(tmp_path / "control.db"))

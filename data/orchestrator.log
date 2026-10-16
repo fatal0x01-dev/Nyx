@@ -2639,3 +2639,232 @@ do not modify the system during the investigation. present your findings, suppor
 2026-10-16 05:11:28  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
 2026-10-16 05:11:28  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
 2026-10-16 05:11:28  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 05:12:29  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 05:12:29  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 05:12:29  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:12:29  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 05:12:29  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 05:12:29  INFO      __main__                        ============================================================
+2026-10-16 05:12:29  INFO      __main__                        ORCHESTRATOR START
+2026-10-16 05:12:29  INFO      __main__                        Goal: perform a system health investigation. identify the operating system, kernel, resource usage, disk layout, running services, network configuration, failed systemd units, and relevant errors in system logs.
+identify any problems you find and distinguish genuine issues from normal kali behaviour.
+do not modify the system during the investigation. present your findings, supporting command output, and recommended actions. wait for my approval before making changes.
+2026-10-16 05:12:29  INFO      __main__                        ============================================================
+2026-10-16 05:12:29  INFO      __main__                        Checking executor availability...
+2026-10-16 05:12:29  WARNING   __main__                        Executor LM Studio not reachable at http://localhost:11434/v1 — make sure it's running before tasks are dispatched.
+2026-10-16 05:12:29  INFO      __main__                        Not running inside tmux — executor will drive a detached session named 'nyx'. Run `tmux attach -t nyx` to watch/join.
+2026-10-16 05:12:29  INFO      utils.tmux_client               Attaching to current running tmux pane: mywork:7.0
+2026-10-16 05:12:29  INFO      executor.executor               Opening SSH connection to kali@192.168.1.69 in tmux window mywork:8.0
+2026-10-16 05:12:32  INFO      __main__                        --------------------------------------------------
+2026-10-16 05:12:32  INFO      __main__                        Iteration 1 / 50
+2026-10-16 05:12:49  INFO      planner.planner                 Planner action: create_tasks
+2026-10-16 05:12:49  INFO      tasks.task_manager              Queued  Task(task001) [PENDING] priority=1 retries=0 | Identify the operating system and kernel version
+2026-10-16 05:12:49  INFO      tasks.task_manager              Queued  Task(task002) [PENDING] priority=2 retries=0 | Check resource usage (CPU, memory, disk)
+2026-10-16 05:12:49  INFO      tasks.task_manager              Queued  Task(task003) [PENDING] priority=3 retries=0 | Identify disk layout
+2026-10-16 05:12:49  INFO      tasks.task_manager              Queued  Task(task004) [PENDING] priority=4 retries=0 | List running services
+2026-10-16 05:12:49  INFO      tasks.task_manager              Queued  Task(task005) [PENDING] priority=5 retries=0 | Check network configuration
+2026-10-16 05:12:49  INFO      tasks.task_manager              Queued  Task(task006) [PENDING] priority=6 retries=0 | Identify failed systemd units
+2026-10-16 05:12:49  INFO      tasks.task_manager              Queued  Task(task007) [PENDING] priority=7 retries=0 | Review relevant errors in system logs
+2026-10-16 05:12:49  INFO      tasks.task_manager              Queued  Task(task008) [PENDING] priority=8 retries=0 | Identify any problems and distinguish genuine issues from normal Kali behavior
+2026-10-16 05:12:49  INFO      tasks.task_manager              Queued  Task(task009) [PENDING] priority=9 retries=0 | Present findings, supporting command output, and recommended actions
+2026-10-16 05:12:49  INFO      tasks.task_manager              Running Task(task001) [RUNNING] priority=1 retries=0 | Identify the operating system and kernel version
+2026-10-16 05:12:49  INFO      executor.executor               Task task001: joined the currently running terminal session (mywork:8.0)
+2026-10-16 05:12:53  INFO      executor.executor               Task task001: running `uname -a`
+2026-10-16 05:12:56  INFO      executor.executor               Task task001: shell agent signaled completed
+2026-10-16 05:12:59  INFO      tasks.task_manager              Done    Task(task001) [COMPLETED] priority=1 retries=0 | Identify the operating system and kernel version
+2026-10-16 05:12:59  INFO      __main__                        --------------------------------------------------
+2026-10-16 05:12:59  INFO      __main__                        Iteration 2 / 50
+2026-10-16 05:13:14  INFO      planner.planner                 Planner action: create_tasks
+2026-10-16 05:13:14  INFO      tasks.task_manager              Queued  Task(task002) [PENDING] priority=1 retries=0 | Check resource usage (CPU, memory, disk) using 'top' and 'df -h'
+2026-10-16 05:13:14  INFO      tasks.task_manager              Queued  Task(task003) [PENDING] priority=2 retries=0 | Identify disk layout using 'lsblk' and 'fdisk -l'
+2026-10-16 05:13:14  INFO      tasks.task_manager              Queued  Task(task004) [PENDING] priority=3 retries=0 | List running services using 'systemctl list-units --type=service --state=running
+2026-10-16 05:13:14  INFO      tasks.task_manager              Queued  Task(task005) [PENDING] priority=4 retries=0 | Check network configuration using 'ip addr' and 'ip route'
+2026-10-16 05:13:14  INFO      tasks.task_manager              Queued  Task(task006) [PENDING] priority=5 retries=0 | Identify failed systemd units using 'systemctl --failed'
+2026-10-16 05:13:14  INFO      tasks.task_manager              Queued  Task(task007) [PENDING] priority=6 retries=0 | Review relevant errors in system logs using 'journalctl -xe'
+2026-10-16 05:13:14  INFO      __main__                        Skipping duplicate planner task already pending/running: Identify any problems and distinguish genuine issues from normal Kali behavior
+2026-10-16 05:13:14  INFO      __main__                        Skipping duplicate planner task already pending/running: Present findings, supporting command output, and recommended actions
+2026-10-16 05:13:14  INFO      tasks.task_manager              Running Task(task002) [RUNNING] priority=1 retries=0 | Check resource usage (CPU, memory, disk) using 'top' and 'df -h'
+2026-10-16 05:13:14  INFO      executor.executor               Task task002: joined the currently running terminal session (mywork:8.0)
+2026-10-16 05:13:16  INFO      executor.executor               Task task002: running `top -b -n 1`
+2026-10-16 05:13:20  INFO      executor.executor               Task task002: running `df -h`
+2026-10-16 05:13:24  INFO      executor.executor               Task task002: shell agent signaled completed
+2026-10-16 05:13:29  INFO      tasks.task_manager              Done    Task(task002) [COMPLETED] priority=1 retries=0 | Check resource usage (CPU, memory, disk) using 'top' and 'df -h'
+2026-10-16 05:13:29  INFO      __main__                        --------------------------------------------------
+2026-10-16 05:13:29  INFO      __main__                        Iteration 3 / 50
+2026-10-16 05:13:45  INFO      planner.planner                 Planner action: create_tasks
+2026-10-16 05:13:45  INFO      __main__                        Skipping duplicate planner task already pending/running: Identify disk layout using 'lsblk' and 'fdisk -l'
+2026-10-16 05:13:45  INFO      __main__                        Skipping duplicate planner task already pending/running: List running services using 'systemctl list-units --type=service --state=running'
+2026-10-16 05:13:45  INFO      __main__                        Skipping duplicate planner task already pending/running: Check network configuration using 'ip addr' and 'ip route'
+2026-10-16 05:13:45  INFO      __main__                        Skipping duplicate planner task already pending/running: Identify failed systemd units using 'systemctl --failed'
+2026-10-16 05:13:45  INFO      __main__                        Skipping duplicate planner task already pending/running: Review relevant errors in system logs using 'journalctl -xe'
+2026-10-16 05:13:45  INFO      __main__                        Skipping duplicate planner task already pending/running: Identify any problems and distinguish genuine issues from normal Kali behavior
+2026-10-16 05:13:45  INFO      __main__                        Skipping duplicate planner task already pending/running: Present findings, supporting command output, and recommended actions
+2026-10-16 05:13:45  INFO      tasks.task_manager              Running Task(task003) [RUNNING] priority=2 retries=0 | Identify disk layout using 'lsblk' and 'fdisk -l'
+2026-10-16 05:13:45  INFO      executor.executor               Task task003: joined the currently running terminal session (mywork:8.0)
+2026-10-16 05:13:47  INFO      executor.executor               Task task003: running `lsblk`
+2026-10-16 05:13:49  INFO      executor.executor               Task task003: running `fdisk -l`
+2026-10-16 05:14:04  WARNING   __main__                        Interrupted by user — state saved, resume any time.
+2026-10-16 05:16:22  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 05:16:22  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 05:16:22  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:16:22  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 05:16:22  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 05:16:22  INFO      tasks.task_manager              Queued  Task(retry) [PENDING] priority=1 retries=1 | verify internet connectivity
+2026-10-16 05:16:22  INFO      tasks.task_manager              Cancelled Task(retry) [CANCELLED] priority=1 retries=1 | verify internet connectivity | Superseded by planner-confirmed goal completion.
+2026-10-16 05:16:22  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 05:16:22  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:16:22  INFO      tasks.task_manager              Queued  Task(t1) [PENDING] priority=1 retries=0 | inspect docker-compose
+2026-10-16 05:16:22  INFO      tasks.task_manager              Queued  Task(t2) [PENDING] priority=3 retries=0 | update docker-compose
+2026-10-16 05:16:22  WARNING   tasks.task_manager              Retry   Task(t1) [PENDING] priority=11 retries=1 | inspect docker-compose (attempt 1) priority=11
+2026-10-16 05:16:22  INFO      executor.executor               Task connectivity: joined the currently running terminal session (nyx:1.0)
+2026-10-16 05:16:22  INFO      executor.executor               Task connectivity: running `ping -c 1 8.8.8.8`
+2026-10-16 05:16:22  INFO      memory.task_store               TaskStore opened: /tmp/pytest-of-fatal0x01/pytest-28/test_successful_connectivity_p0/tasks.db
+2026-10-16 05:16:22  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:16:22  INFO      tasks.task_manager              Queued  Task(ping) [PENDING] priority=1 retries=0 | Ping an external address
+2026-10-16 05:16:22  INFO      tasks.task_manager              Queued  Task(restart) [PENDING] priority=2 retries=0 | Restart networking service
+2026-10-16 05:16:22  INFO      orchestrator                    --------------------------------------------------
+2026-10-16 05:16:22  INFO      orchestrator                    Iteration 1 / 50
+2026-10-16 05:16:22  INFO      tasks.task_manager              Done    Task(ping) [COMPLETED] priority=1 retries=0 | Ping an external address
+2026-10-16 05:16:22  INFO      tasks.task_manager              Cancelled Task(restart) [CANCELLED] priority=2 retries=0 | Restart networking service | Superseded: a successful ping confirmed the requested network connectivity.
+2026-10-16 05:16:22  INFO      executor.executor               Task disk-edit: joined the currently running terminal session (nyx:0.0)
+2026-10-16 05:16:22  ERROR     executor.executor               Task disk-edit: blocked high-risk command: `parted` can change disk partition layouts. Nyx blocks partition-editing commands; inspect disks with `lsblk` and make any required disk changes manually.
+2026-10-16 05:16:22  INFO      executor.executor               Task approval: joined the currently running terminal session (nyx:0.0)
+2026-10-16 05:16:22  INFO      executor.executor               Task approval: shell agent signaled completed
+2026-10-16 05:16:22  INFO      executor.executor               Task repeat-approval: joined the currently running terminal session (nyx:0.0)
+2026-10-16 05:16:22  INFO      executor.executor               Task credential: joined the currently running terminal session (nyx:0.0)
+2026-10-16 05:16:22  INFO      memory.task_store               TaskStore opened: /tmp/pytest-of-fatal0x01/pytest-28/test_orchestrator_stops_run_af0/tasks.db
+2026-10-16 05:16:22  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:16:22  INFO      orchestrator                    --------------------------------------------------
+2026-10-16 05:16:22  INFO      orchestrator                    Iteration 1 / 50
+2026-10-16 05:16:22  INFO      tasks.task_manager              Queued  Task(danger) [PENDING] priority=1 retries=0 | Inspect disk layout
+2026-10-16 05:16:22  INFO      tasks.task_manager              Running Task(danger) [RUNNING] priority=1 retries=0 | Inspect disk layout
+2026-10-16 05:16:22  WARNING   tasks.task_manager              Failed  Task(danger) [FAILED] priority=1 retries=0 | Inspect disk layout | Partition editing is blocked.
+2026-10-16 05:16:22  ERROR     orchestrator                    Task danger exhausted 3 retries — marked FAILED
+2026-10-16 05:16:22  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 05:16:22  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 05:16:22  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:16:22  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 05:16:22  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 05:16:40  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 05:16:40  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 05:16:40  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:16:40  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 05:16:40  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 05:16:40  INFO      tasks.task_manager              Queued  Task(retry) [PENDING] priority=1 retries=1 | verify internet connectivity
+2026-10-16 05:16:40  INFO      tasks.task_manager              Cancelled Task(retry) [CANCELLED] priority=1 retries=1 | verify internet connectivity | Superseded by planner-confirmed goal completion.
+2026-10-16 05:16:40  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 05:16:40  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:16:40  INFO      tasks.task_manager              Queued  Task(t1) [PENDING] priority=1 retries=0 | inspect docker-compose
+2026-10-16 05:16:40  INFO      tasks.task_manager              Queued  Task(t2) [PENDING] priority=3 retries=0 | update docker-compose
+2026-10-16 05:16:40  WARNING   tasks.task_manager              Retry   Task(t1) [PENDING] priority=11 retries=1 | inspect docker-compose (attempt 1) priority=11
+2026-10-16 05:16:40  INFO      executor.executor               Task connectivity: joined the currently running terminal session (nyx:1.0)
+2026-10-16 05:16:40  INFO      executor.executor               Task connectivity: running `ping -c 1 8.8.8.8`
+2026-10-16 05:16:40  INFO      memory.task_store               TaskStore opened: /tmp/pytest-of-fatal0x01/pytest-29/test_successful_connectivity_p0/tasks.db
+2026-10-16 05:16:40  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:16:40  INFO      tasks.task_manager              Queued  Task(ping) [PENDING] priority=1 retries=0 | Ping an external address
+2026-10-16 05:16:40  INFO      tasks.task_manager              Queued  Task(restart) [PENDING] priority=2 retries=0 | Restart networking service
+2026-10-16 05:16:40  INFO      orchestrator                    --------------------------------------------------
+2026-10-16 05:16:40  INFO      orchestrator                    Iteration 1 / 50
+2026-10-16 05:16:40  INFO      tasks.task_manager              Done    Task(ping) [COMPLETED] priority=1 retries=0 | Ping an external address
+2026-10-16 05:16:40  INFO      tasks.task_manager              Cancelled Task(restart) [CANCELLED] priority=2 retries=0 | Restart networking service | Superseded: a successful ping confirmed the requested network connectivity.
+2026-10-16 05:16:40  INFO      executor.executor               Task disk-edit: joined the currently running terminal session (nyx:0.0)
+2026-10-16 05:16:40  ERROR     executor.executor               Task disk-edit: blocked high-risk command: `parted` can change disk partition layouts. Nyx blocks partition-editing commands; inspect disks with `lsblk` and make any required disk changes manually.
+2026-10-16 05:16:40  INFO      executor.executor               Task approval: joined the currently running terminal session (nyx:0.0)
+2026-10-16 05:16:40  INFO      executor.executor               Task approval: shell agent signaled completed
+2026-10-16 05:16:40  INFO      executor.executor               Task repeat-approval: joined the currently running terminal session (nyx:0.0)
+2026-10-16 05:16:40  INFO      executor.executor               Task credential: joined the currently running terminal session (nyx:0.0)
+2026-10-16 05:16:40  INFO      memory.task_store               TaskStore opened: /tmp/pytest-of-fatal0x01/pytest-29/test_orchestrator_stops_run_af0/tasks.db
+2026-10-16 05:16:40  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:16:40  INFO      orchestrator                    --------------------------------------------------
+2026-10-16 05:16:40  INFO      orchestrator                    Iteration 1 / 50
+2026-10-16 05:16:40  INFO      tasks.task_manager              Queued  Task(danger) [PENDING] priority=1 retries=0 | Inspect disk layout
+2026-10-16 05:16:40  INFO      tasks.task_manager              Running Task(danger) [RUNNING] priority=1 retries=0 | Inspect disk layout
+2026-10-16 05:16:40  WARNING   tasks.task_manager              Failed  Task(danger) [FAILED] priority=1 retries=0 | Inspect disk layout | Partition editing is blocked.
+2026-10-16 05:16:40  ERROR     orchestrator                    Task danger exhausted 3 retries — marked FAILED
+2026-10-16 05:16:40  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 05:16:40  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 05:16:40  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:16:40  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 05:16:40  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 05:17:48  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 05:17:48  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 05:17:48  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:17:48  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 05:17:48  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 05:17:48  INFO      tasks.task_manager              Queued  Task(retry) [PENDING] priority=1 retries=1 | verify internet connectivity
+2026-10-16 05:17:48  INFO      tasks.task_manager              Cancelled Task(retry) [CANCELLED] priority=1 retries=1 | verify internet connectivity | Superseded by planner-confirmed goal completion.
+2026-10-16 05:17:48  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 05:17:48  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:17:48  INFO      tasks.task_manager              Queued  Task(t1) [PENDING] priority=1 retries=0 | inspect docker-compose
+2026-10-16 05:17:48  INFO      tasks.task_manager              Queued  Task(t2) [PENDING] priority=3 retries=0 | update docker-compose
+2026-10-16 05:17:48  WARNING   tasks.task_manager              Retry   Task(t1) [PENDING] priority=11 retries=1 | inspect docker-compose (attempt 1) priority=11
+2026-10-16 05:17:48  INFO      executor.executor               Task connectivity: joined the currently running terminal session (nyx:1.0)
+2026-10-16 05:17:48  INFO      executor.executor               Task connectivity: running `ping -c 1 8.8.8.8`
+2026-10-16 05:17:48  INFO      memory.task_store               TaskStore opened: /tmp/pytest-of-fatal0x01/pytest-30/test_successful_connectivity_p0/tasks.db
+2026-10-16 05:17:48  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:17:48  INFO      tasks.task_manager              Queued  Task(ping) [PENDING] priority=1 retries=0 | Ping an external address
+2026-10-16 05:17:48  INFO      tasks.task_manager              Queued  Task(restart) [PENDING] priority=2 retries=0 | Restart networking service
+2026-10-16 05:17:48  INFO      orchestrator                    --------------------------------------------------
+2026-10-16 05:17:48  INFO      orchestrator                    Iteration 1 / 50
+2026-10-16 05:17:48  INFO      tasks.task_manager              Done    Task(ping) [COMPLETED] priority=1 retries=0 | Ping an external address
+2026-10-16 05:17:48  INFO      tasks.task_manager              Cancelled Task(restart) [CANCELLED] priority=2 retries=0 | Restart networking service | Superseded: a successful ping confirmed the requested network connectivity.
+2026-10-16 05:17:48  INFO      executor.executor               Task disk-edit: joined the currently running terminal session (nyx:0.0)
+2026-10-16 05:17:48  ERROR     executor.executor               Task disk-edit: blocked high-risk command: `parted` can change disk partition layouts. Nyx blocks partition-editing commands; inspect disks with `lsblk` and make any required disk changes manually.
+2026-10-16 05:17:48  INFO      executor.executor               Task approval: joined the currently running terminal session (nyx:0.0)
+2026-10-16 05:17:48  INFO      executor.executor               Task approval: shell agent signaled completed
+2026-10-16 05:17:48  INFO      executor.executor               Task repeat-approval: joined the currently running terminal session (nyx:0.0)
+2026-10-16 05:17:48  INFO      executor.executor               Task credential: joined the currently running terminal session (nyx:0.0)
+2026-10-16 05:17:48  INFO      memory.task_store               TaskStore opened: /tmp/pytest-of-fatal0x01/pytest-30/test_orchestrator_stops_run_af0/tasks.db
+2026-10-16 05:17:48  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:17:48  INFO      orchestrator                    --------------------------------------------------
+2026-10-16 05:17:48  INFO      orchestrator                    Iteration 1 / 50
+2026-10-16 05:17:48  INFO      tasks.task_manager              Queued  Task(danger) [PENDING] priority=1 retries=0 | Inspect disk layout
+2026-10-16 05:17:48  INFO      tasks.task_manager              Running Task(danger) [RUNNING] priority=1 retries=0 | Inspect disk layout
+2026-10-16 05:17:48  WARNING   tasks.task_manager              Failed  Task(danger) [FAILED] priority=1 retries=0 | Inspect disk layout | Partition editing is blocked.
+2026-10-16 05:17:48  ERROR     orchestrator                    Task danger exhausted 3 retries — marked FAILED
+2026-10-16 05:17:48  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 05:17:48  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 05:17:48  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:17:48  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 05:17:48  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 05:17:56  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 05:17:56  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 05:17:56  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:17:56  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 05:17:56  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)
+2026-10-16 05:17:56  INFO      tasks.task_manager              Queued  Task(retry) [PENDING] priority=1 retries=1 | verify internet connectivity
+2026-10-16 05:17:56  INFO      tasks.task_manager              Cancelled Task(retry) [CANCELLED] priority=1 retries=1 | verify internet connectivity | Superseded by planner-confirmed goal completion.
+2026-10-16 05:17:56  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 05:17:56  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:17:56  INFO      tasks.task_manager              Queued  Task(t1) [PENDING] priority=1 retries=0 | inspect docker-compose
+2026-10-16 05:17:56  INFO      tasks.task_manager              Queued  Task(t2) [PENDING] priority=3 retries=0 | update docker-compose
+2026-10-16 05:17:56  WARNING   tasks.task_manager              Retry   Task(t1) [PENDING] priority=11 retries=1 | inspect docker-compose (attempt 1) priority=11
+2026-10-16 05:17:56  INFO      executor.executor               Task connectivity: joined the currently running terminal session (nyx:1.0)
+2026-10-16 05:17:56  INFO      executor.executor               Task connectivity: running `ping -c 1 8.8.8.8`
+2026-10-16 05:17:56  INFO      memory.task_store               TaskStore opened: /tmp/pytest-of-fatal0x01/pytest-31/test_successful_connectivity_p0/tasks.db
+2026-10-16 05:17:56  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:17:56  INFO      tasks.task_manager              Queued  Task(ping) [PENDING] priority=1 retries=0 | Ping an external address
+2026-10-16 05:17:56  INFO      tasks.task_manager              Queued  Task(restart) [PENDING] priority=2 retries=0 | Restart networking service
+2026-10-16 05:17:56  INFO      orchestrator                    --------------------------------------------------
+2026-10-16 05:17:56  INFO      orchestrator                    Iteration 1 / 50
+2026-10-16 05:17:56  INFO      tasks.task_manager              Done    Task(ping) [COMPLETED] priority=1 retries=0 | Ping an external address
+2026-10-16 05:17:56  INFO      tasks.task_manager              Cancelled Task(restart) [CANCELLED] priority=2 retries=0 | Restart networking service | Superseded: a successful ping confirmed the requested network connectivity.
+2026-10-16 05:17:56  INFO      executor.executor               Task disk-edit: joined the currently running terminal session (nyx:0.0)
+2026-10-16 05:17:56  ERROR     executor.executor               Task disk-edit: blocked high-risk command: `parted` can change disk partition layouts. Nyx blocks partition-editing commands; inspect disks with `lsblk` and make any required disk changes manually.
+2026-10-16 05:17:56  INFO      executor.executor               Task approval: joined the currently running terminal session (nyx:0.0)
+2026-10-16 05:17:56  INFO      executor.executor               Task approval: shell agent signaled completed
+2026-10-16 05:17:56  INFO      executor.executor               Task repeat-approval: joined the currently running terminal session (nyx:0.0)
+2026-10-16 05:17:56  INFO      executor.executor               Task credential: joined the currently running terminal session (nyx:0.0)
+2026-10-16 05:17:56  INFO      memory.task_store               TaskStore opened: /tmp/pytest-of-fatal0x01/pytest-31/test_orchestrator_stops_run_af0/tasks.db
+2026-10-16 05:17:56  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:17:56  INFO      orchestrator                    --------------------------------------------------
+2026-10-16 05:17:56  INFO      orchestrator                    Iteration 1 / 50
+2026-10-16 05:17:56  INFO      tasks.task_manager              Queued  Task(danger) [PENDING] priority=1 retries=0 | Inspect disk layout
+2026-10-16 05:17:56  INFO      tasks.task_manager              Running Task(danger) [RUNNING] priority=1 retries=0 | Inspect disk layout
+2026-10-16 05:17:56  WARNING   tasks.task_manager              Failed  Task(danger) [FAILED] priority=1 retries=0 | Inspect disk layout | Partition editing is blocked.
+2026-10-16 05:17:56  ERROR     orchestrator                    Task danger exhausted 3 retries — marked FAILED
+2026-10-16 05:17:56  INFO      memory.task_store               TaskStore opened: /home/fatal0x01/Nyx/data/task_history.db
+2026-10-16 05:17:56  INFO      memory.rag_store                RAGStore: disabled (Phase 1 stub). Enable in Phase 3.
+2026-10-16 05:17:56  INFO      tasks.task_manager              Previous-session task resume disabled; cleared stale pending/running tasks.
+2026-10-16 05:17:56  INFO      planner.planner                 Planner ready — http://localhost:11434/v1  model=qwen2.5-coder:14b
+2026-10-16 05:17:56  INFO      executor.executor               Executor ready — http://localhost:11434/v1 model=qwen2.5-coder:14b (tmux-driven)

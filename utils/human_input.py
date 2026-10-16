@@ -81,7 +81,17 @@ def request_human_input(kind: str, prompt: str) -> str:
     print(f"Context: {prompt}", file=sys.stderr)
 
     while True:
-        answer = input("Enter response: ").strip()
+        answer = input(
+            "Enter response [y/n]: " if kind == "approval" else "Enter response: "
+        ).strip()
+        if kind == "approval":
+            normalized = answer.casefold()
+            if normalized in {"y", "yes", "approve", "approved"}:
+                return "y"
+            if normalized in {"n", "no", "deny", "denied"}:
+                return "n"
+            print("Please answer y/yes or n/no.", file=sys.stderr)
+            continue
         if answer:
             return answer
         print("A response is required. Please enter a value.", file=sys.stderr)

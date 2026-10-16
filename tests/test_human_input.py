@@ -1,4 +1,4 @@
-from utils.human_input import detect_human_input_need
+from utils.human_input import detect_human_input_need, request_human_input
 
 
 def test_detects_approval_prompt():
@@ -26,3 +26,24 @@ def test_detects_unsafe_ignore_cancel_prompt():
         result = detect_human_input_need(prompt)
         assert result is not None
         assert result["kind"] == "unsafe_confirmation"
+
+
+def test_approval_words_normalize_to_single_terminal_key(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda prompt: "yes")
+    assert request_human_input("approval", "Continue? [y/n]") == "y"
+
+    monkeypatch.setattr("builtins.input", lambda prompt: "no")
+    assert request_human_input("approval", "Continue? [y/n]") == "n"
+
+
+def test_invalid_approval_reprompts_instead_of_typing_arbitrary_text(monkeypatch):
+    answers = iter(["maybe", "yes"])
+    prompts = []
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda prompt: prompts.append(prompt) or next(answers),
+    )
+
+    assert request_human_input("approval", "Continue? [y/n]") == "y"
+    assert len(prompts) == 2
+    assert all("[y/n]" in prompt for prompt in prompts)

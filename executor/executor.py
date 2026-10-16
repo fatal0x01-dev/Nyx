@@ -650,20 +650,53 @@ class Executor:
                 continue
 
             if kind == "human_input":
-                input_kind = action.get("kind", "approval")
-                prompt = action.get("prompt", "The command is waiting for input.")
-                human_response = request_human_input(input_kind, prompt)
-                try:
-                    self._tmux.send_raw_keys(target, human_response)
-                except TmuxError as e:
-                    log.error("Task %s: failed to send human answer to tmux pane: %s", task.id, e)
-                    return {"status": "failed", "result": "", "error": str(e)}
+                input_kind = str(action.get("kind", "approval"))
+                prompt = str(action.get("prompt", "The executor requested human approval."))
+                if input_kind != "approval":
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": (
+                            "The executor requested input that was not prompted by the terminal. "
+                            "Nyx will not type model-requested credentials or arbitrary input into the shell."
+                        ),
+                    }
+
+                if any(
+                    entry.get("command") == "<human_input approval>"
+                    for entry in step_log
+                ):
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": (
+                            "The executor requested approval more than once in one task. "
+                            "Stopped to prevent repeated approval prompts."
+                        ),
+                    }
+
+                human_response = request_human_input(input_kind, prompt).strip().lower()
+                if human_response not in {"y", "yes", "approve", "approved"}:
+                    step_log.append({
+                        "command": "<human_input approval>",
+                        "output": f"User declined: {prompt}",
+                        "exit_code": None,
+                        "timed_out": False,
+                    })
+                    self._last_step_log = list(step_log)
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": "The user did not approve the requested action.",
+                    }
+
                 step_log.append({
-                    "command": f"<human_input {input_kind}>",
-                    "output": f"Human responded to: {prompt}",
+                    "command": "<human_input approval>",
+                    "output": f"User approved: {prompt}",
                     "exit_code": None,
                     "timed_out": False,
                 })
+                self._last_step_log = list(step_log)
                 continue
 
             if kind == "run_command":
