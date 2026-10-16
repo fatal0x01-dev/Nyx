@@ -74,7 +74,7 @@ class Orchestrator:
         goal: str,
         ssh_config: SSHConfig | None = None,
         auto_mode: bool = False,
-        password_mode: bool = False,
+        sudo_password: str | None = None,
     ):
         """Start the orchestration loop for a given goal."""
         self._goal = goal
@@ -85,13 +85,13 @@ class Orchestrator:
         self._run_id = new_id()
         self._control.start_run(self._run_id, goal)
         self._executor.configure_control_plane(self._control, self._run_id)
-        self._executor.configure_input_modes(auto_mode, password_mode)
+        self._executor.configure_input_modes(auto_mode, sudo_password)
         if auto_mode:
             log.warning(
                 "AUTONOMOUS MODE ENABLED: Nyx will automatically accept detected prompts."
             )
-        if password_mode:
-            log.info("Secure sudo password entry is enabled and will be requested only when needed.")
+        if sudo_password is not None:
+            log.info("Automatic sudo password entry is enabled.")
         self._publish_report()
 
         log.info("=" * 60)
@@ -441,15 +441,6 @@ class Orchestrator:
                 "Review the goal and terminal before starting another run."
             )
 
-        terminal_evidence = self._format_terminal_evidence(
-            task,
-            getattr(self._executor, "_last_step_log", []),
-        )
-        if terminal_evidence:
-            self._recent_terminal_context.append(terminal_evidence)
-            self._recent_terminal_context = self._recent_terminal_context[-8:]
-            task.metadata["terminal_evidence"] = terminal_evidence
-
         status = result.get("status", "failed")
         result_text = result.get("result", "")
         error_text = result.get("error", "")
@@ -501,6 +492,21 @@ class Orchestrator:
                     task.id,
                     cfg.MAX_TASK_RETRIES,
                 )
+
+        terminal_evidence = self._format_terminal_evidence(
+            task,
+            getattr(self._executor, "_last_step_log", []),
+        )
+        outcome = (
+            f"TASK OUTCOME {task.id}: status={status}\n"
+            f"task={task.description}\n"
+            f"result={result_text or '(none)'}\n"
+            f"error={error_text or '(none)'}"
+        )
+        task_context = "\n".join(part for part in (terminal_evidence, outcome) if part)
+        self._recent_terminal_context.append(task_context)
+        self._recent_terminal_context = self._recent_terminal_context[-8:]
+        task.metadata["terminal_evidence"] = task_context
         self._publish_report()
 
     # ── Helpers ───────────────────────────────────────────────────────────
@@ -549,7 +555,7 @@ class Orchestrator:
 
 def parse_cli_args(
     argv: list[str] | None = None,
-) -> tuple[str, SSHConfig | None, bool, bool]:
+) -> tuple[str, SSHConfig | None, bool, str | None]:
     """Parse the goal and optional SSH connection parameters."""
     parser = argparse.ArgumentParser(description="Run Nyx against a local or SSH terminal.")
     parser.add_argument("--ssh", action="store_true", help="Connect to the IP supplied with --ip before planning.")
@@ -563,8 +569,11 @@ def parse_cli_args(
     )
     parser.add_argument(
         "--password",
-        action="store_true",
-        help="Allow secure hidden entry of sudo passwords when requested by the terminal.",
+        metavar="PASSWORD",
+        help=(
+            "Automatically enter PASSWORD at sudo password prompts. "
+            "Warning: command-line values may be visible in shell history and process listings."
+        ),
     )
     parser.add_argument("--ip", help="Required IP address for the SSH destination.")
     parser.add_argument("--ssh-user", help=f"SSH username (default: {cfg.SSH_DEFAULT_USER})")
@@ -608,7 +617,7 @@ def parse_cli_args(
 
 def main():
     """CLI entry point."""
-    goal, ssh_config, auto_mode, password_mode = parse_cli_args()
+    goal, ssh_config, auto_mode, sudo_password = parse_cli_args()
     if not goal:
         goal = input("Enter goal: ").strip()
 
@@ -621,7 +630,7 @@ def main():
         goal,
         ssh_config=ssh_config,
         auto_mode=auto_mode,
-        password_mode=password_mode,
+        sudo_password=sudo_password,
     )
 
 

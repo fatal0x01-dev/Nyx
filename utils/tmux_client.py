@@ -44,11 +44,9 @@ class TmuxClient:
     def __init__(self, session_name: str = "nyx"):
         self._session_name = session_name
         self._auto_mode = False
-        self._password_mode = False
 
-    def configure_input_modes(self, auto_mode: bool, password_mode: bool) -> None:
+    def configure_input_modes(self, auto_mode: bool) -> None:
         self._auto_mode = auto_mode
-        self._password_mode = password_mode
 
     @staticmethod
     def _automatic_prompt_response(kind: str, prompt: str) -> str:

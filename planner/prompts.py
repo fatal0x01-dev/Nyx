@@ -47,6 +47,10 @@ Rules:
 - Use failed-task evidence to choose a materially different approach, continue
   with other requested objectives, or report a concrete limitation when safe
   progress is not possible. Do not repeat an ineffective action.
+- If a directory-creation task reports that the requested path already exists,
+  do not count it as newly created. Plan a different unused directory name and
+  update every dependent task path consistently; do not overwrite or reuse the
+  existing directory unless the user explicitly requested that.
 - Do not create duplicate tasks for work already pending, running, or completed successfully.
 - Treat user guidance as additional direction for this run, while preserving the stated goal and safety rules.
 - Plan for the requested outcome, not an assumed repair workflow. Do not add

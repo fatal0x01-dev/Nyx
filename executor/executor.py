@@ -83,7 +83,7 @@ class Executor:
         self._control_plane: ControlPlane | None = None
         self._control_run_id: str | None = None
         self._auto_mode = False
-        self._password_mode = False
+        self._sudo_password: str | None = None
 
         log.info(
             "Executor ready — %s model=%s (tmux-driven)",
@@ -336,10 +336,10 @@ class Executor:
         self._control_plane = control_plane
         self._control_run_id = run_id
 
-    def configure_input_modes(self, auto_mode: bool, password_mode: bool) -> None:
+    def configure_input_modes(self, auto_mode: bool, sudo_password: str | None) -> None:
         self._auto_mode = auto_mode
-        self._password_mode = password_mode
-        self._tmux.configure_input_modes(auto_mode, password_mode)
+        self._sudo_password = sudo_password
+        self._tmux.configure_input_modes(auto_mode)
 
     def _control_checkpoint(self, task: Task, phase: str) -> str:
         if self._control_plane is None or self._control_run_id is None:
@@ -576,6 +576,26 @@ class Executor:
         return (
             ("validate" in text or "check" in text or "verify" in text or "inspect" in text)
             and ("docker-compose" in text or ".yml" in text or ".yaml" in text or "compose" in text)
+        )
+
+    @staticmethod
+    def _is_directory_creation_task(task_description: str) -> bool:
+        return bool(
+            re.search(
+                r"\b(?:create|make|mkdir)\b.{0,80}director(?:y|ies)\b",
+                task_description or "",
+                re.IGNORECASE,
+            )
+        )
+
+    @staticmethod
+    def _directory_exists_conflict(text: str) -> bool:
+        return bool(
+            re.search(
+                r"\b(?:already exists|file exists|directory exists|exists already)\b",
+                text or "",
+                re.IGNORECASE,
+            )
         )
 
     @staticmethod
@@ -909,14 +929,19 @@ class Executor:
                     and entry.get("exit_code") == 0
                     for entry in step_log
                 ):
-                    return {
-                        "status": "failed",
-                        "result": "",
-                        "error": (
+                    message = (
                             f"Read {path} successfully before writing it. Nyx only permits "
                             "replacing the exact file reviewed in this task."
-                        ),
-                    }
+                    )
+                    step_log.append({
+                        "command": f"<write_file {path}>",
+                        "output": message,
+                        "exit_code": None,
+                        "timed_out": False,
+                        "policy_blocked": True,
+                    })
+                    self._last_step_log = list(step_log)
+                    continue
                 content = action.get("content")
                 if not isinstance(content, str):
                     return {
@@ -1009,6 +1034,23 @@ class Executor:
                 status = action.get("status", "completed")
                 if (
                     status == "completed"
+                    and self._is_directory_creation_task(task.description)
+                    and any(
+                        self._directory_exists_conflict(str(entry.get("output", "")))
+                        for entry in step_log
+                        if isinstance(entry, dict)
+                    )
+                ):
+                    error = (
+                        "The requested directory already exists, so Nyx did not create "
+                        "a new directory. Report this conflict to the planner, which "
+                        "must choose a different unused directory name and update all "
+                        "dependent task paths consistently."
+                    )
+                    self._last_step_log = list(step_log)
+                    return {"status": "failed", "result": "", "error": error}
+                if (
+                    status == "completed"
                     and self._requires_file_write(task.description)
                     and not self._has_write_step(step_log)
                 ):
@@ -1066,6 +1108,30 @@ class Executor:
                             "The executor requested input that was not prompted by the terminal. "
                             "Nyx will not type model-requested credentials or arbitrary input into the shell."
                         ),
+                    }
+
+                if (
+                    self._is_directory_creation_task(task.description)
+                    and self._directory_exists_conflict(prompt)
+                ):
+                    message = (
+                        f"Directory conflict: {prompt} Do not treat an existing "
+                        "directory as newly created; report failure so the planner "
+                        "can choose a different unused directory name and update "
+                        "dependent task paths."
+                    )
+                    step_log.append({
+                        "command": "<directory_conflict>",
+                        "output": message,
+                        "exit_code": None,
+                        "timed_out": False,
+                        "policy_blocked": True,
+                    })
+                    self._last_step_log = list(step_log)
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": message,
                     }
 
                 if any(
@@ -1287,8 +1353,21 @@ class Executor:
                             input_info["prompt"],
                             re.IGNORECASE,
                         )
-                        if input_info["kind"] == "credential" and is_password_prompt:
-                            if not getattr(self, "_password_mode", False):
+                        is_sudo_password_prompt = bool(
+                            re.search(
+                                r"(?:\[sudo\].{0,80}(?:password|passphrase)|"
+                                r"(?:password|passphrase).{0,80}\bsudo\b)",
+                                input_info["prompt"],
+                                re.IGNORECASE | re.DOTALL,
+                            )
+                        )
+                        if (
+                            input_info["kind"] == "credential"
+                            and is_password_prompt
+                            and is_sudo_password_prompt
+                        ):
+                            sudo_password = getattr(self, "_sudo_password", None)
+                            if sudo_password is None:
                                 try:
                                     self._tmux.send_raw_keys(target, "C-c", enter=False)
                                 except TmuxError as e:
@@ -1309,8 +1388,8 @@ class Executor:
                                 step_log.append({
                                     "command": command,
                                     "output": (
-                                        "Sudo password prompt canceled because --password "
-                                        "was not enabled."
+                                        "Sudo password prompt canceled because no --password "
+                                        "value was supplied."
                                     ),
                                     "exit_code": 130,
                                     "timed_out": False,
@@ -1322,57 +1401,10 @@ class Executor:
                                     "result": "",
                                     "error": (
                                         "A sudo password is required. Run Nyx with "
-                                        "--password to allow secure password entry."
+                                        "--password PASSWORD to enter it automatically."
                                     ),
                                 }
-                            if not getattr(self, "_auto_mode", False):
-                                approval_prompt = (
-                                    "This command requires elevated privileges and is waiting "
-                                    f"for a password: {input_info['prompt']}. "
-                                    "Approve continuing with the privileged operation?"
-                                )
-                                approval = request_human_input("approval", approval_prompt)
-                                if approval.strip().casefold() not in {
-                                    "y",
-                                    "yes",
-                                    "approve",
-                                    "approved",
-                                }:
-                                    try:
-                                        self._tmux.send_raw_keys(target, "C-c", enter=False)
-                                    except TmuxError as e:
-                                        log.error(
-                                            "Task %s: could not cancel after privilege was denied: %s",
-                                            task.id,
-                                            e,
-                                        )
-                                        return {
-                                            "status": "failed",
-                                            "result": "",
-                                            "error": (
-                                                "Privilege was denied, and the waiting command "
-                                                f"could not be canceled: {e}"
-                                            ),
-                                            "safety_halt": True,
-                                        }
-                                    step_log.append({
-                                        "command": command,
-                                        "output": "User denied the privileged operation; command canceled.",
-                                        "exit_code": 130,
-                                        "timed_out": False,
-                                        "safety_blocked": True,
-                                    })
-                                    self._last_step_log = list(step_log)
-                                    return {
-                                        "status": "failed",
-                                        "result": "",
-                                        "error": "The user did not approve the privileged operation.",
-                                        "safety_blocked": True,
-                                    }
-                            human_response = request_human_input(
-                                "credential",
-                                input_info["prompt"],
-                            )
+                            human_response = sudo_password
                         else:
                             human_response = request_human_input(
                                 input_info["kind"],
@@ -1382,6 +1414,7 @@ class Executor:
                             if (
                                 input_info["kind"] == "credential"
                                 and is_password_prompt
+                                and is_sudo_password_prompt
                             ):
                                 self._tmux.send_secret(target, human_response)
                             else:
@@ -1412,6 +1445,17 @@ class Executor:
                     "timed_out": result["timed_out"],
                 })
                 self._last_step_log = list(step_log)
+                if (
+                    self._is_directory_creation_task(task.description)
+                    and self._directory_exists_conflict(str(result.get("output", "")))
+                ):
+                    error = (
+                        f"The directory creation command reported a name conflict: "
+                        f"{str(result.get('output', '')).strip()}. Report this to the "
+                        "planner, which must choose a different unused directory name "
+                        "and update all dependent task paths consistently."
+                    )
+                    return {"status": "failed", "result": "", "error": error}
                 if (
                     self._is_basic_connectivity_task(task.description)
                     and self._has_successful_ping(step_log)

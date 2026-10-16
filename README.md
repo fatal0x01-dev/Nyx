@@ -147,15 +147,19 @@ executor approval requests. This is a high-risk opt-in: it can accept
 destructive interactive confirmations. Nyx's existing command safety blocks
 remain in effect.
 
-Use `--password` to allow secure, hidden entry of a sudo password only when
-the terminal requests it. Nyx does not accept the password as a CLI value; it
-is sent through a temporary tmux buffer rather than exposed in process
-arguments. Without `--password`, Nyx cancels sudo password prompts. Combine
-the flags when both behaviors are wanted:
+Provide the sudo password as the value of `--password`. Nyx will automatically
+enter it at sudo password prompts without asking for it interactively; the
+password is sent through a temporary tmux buffer, not tmux command arguments.
+Without `--password`, Nyx cancels sudo password prompts. Because CLI values
+may be visible in shell history and process listings, use this option only in
+a trusted environment:
 
 ```bash
-./run_nyx.sh --auto --password "install and configure the requested service"
+./run_nyx.sh --password 'your-sudo-password' "install and configure the requested service"
 ```
+
+Use `--auto` separately if Nyx should also automatically accept detected
+terminal and executor approval prompts.
 
 ## Project structure
 

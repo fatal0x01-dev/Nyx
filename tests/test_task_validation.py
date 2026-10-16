@@ -13,6 +13,7 @@ from tasks.task import Task
 from tasks.task_manager import TaskManager
 from memory.task_store import TaskStore
 from config import settings
+from executor.file_operations import MISSING_FILE_SENTINEL
 from utils.helpers import normalize_multiline_write_command
 from utils.tmux_client import TmuxClient
 from utils.ssh import SSHConfig, build_ssh_command
@@ -182,7 +183,7 @@ def test_executor_finishes_basic_connectivity_task_after_one_successful_ping(mon
     executor._control_plane = None
     executor._control_run_id = None
     executor._auto_mode = False
-    executor._password_mode = False
+    executor._sudo_password = None
     monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
     monkeypatch.setattr(
         executor,
@@ -386,6 +387,7 @@ def test_docker_setup_prompt_prefers_docker_run_unless_compose_was_requested():
     assert "Dockerfile" in PLANNER_SYSTEM_PROMPT
     assert "`docker build`" in PLANNER_SYSTEM_PROMPT
     assert "alternate port" in PLANNER_SYSTEM_PROMPT
+    assert "different unused directory name" in PLANNER_SYSTEM_PROMPT
     assert "Do not" in PLANNER_SYSTEM_PROMPT
     assert "host Apache" in PLANNER_SYSTEM_PROMPT
 
@@ -465,6 +467,40 @@ def test_docker_setup_rejects_compose_and_host_apache_checks(monkeypatch):
     assert executor._last_step_log[0]["policy_blocked"] is True
     assert executor._last_step_log[1]["policy_blocked"] is True
     assert executor._last_step_log[2]["policy_blocked"] is True
+
+
+def test_existing_directory_conflict_fails_instead_of_auto_approving(monkeypatch):
+    class FakeTmux:
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+    executor = _make_executor_for_actions(
+        [
+            {
+                "action": "human_input",
+                "kind": "approval",
+                "prompt": "The directory ~/web-server already exists. Do you want to proceed?",
+            },
+        ],
+        FakeTmux(),
+    )
+    executor._auto_mode = True
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+    monkeypatch.setattr(
+        "executor.executor.request_human_input",
+        lambda *args: pytest.fail("a directory name conflict is not an approval request"),
+    )
+
+    result = executor.execute(
+        Task(id="create-directory", description="Create the directory ~/web-server")
+    )
+
+    assert result["status"] == "failed"
+    assert "already exists" in result["error"]
+    assert "different unused directory name" in result["error"]
+    assert executor._last_step_log[0]["policy_blocked"] is True
+    assert Executor._is_directory_creation_task("Create thedirectory ~/web-server")
 
 
 def test_docker_port_conflict_guides_retry_on_an_alternate_host_port(monkeypatch):
@@ -781,7 +817,7 @@ def test_tmux_accepts_command_not_found_package_install_prompt_once(monkeypatch)
 
 def test_tmux_auto_accepts_detected_and_unsafe_prompts(monkeypatch):
     client = TmuxClient()
-    client.configure_input_modes(auto_mode=True, password_mode=False)
+    client.configure_input_modes(auto_mode=True)
     commands = []
     markers = {}
     capture_count = 0
@@ -1008,7 +1044,7 @@ def test_ssh_config_builds_requested_rsa_compatible_remote_shell_command():
 
 
 def test_ssh_config_accepts_cli_overrides():
-    goal, config, auto_mode, password_mode = parse_cli_args([
+    goal, config, auto_mode, sudo_password = parse_cli_args([
         "--ssh",
         "--ip",
         "192.0.2.10",
@@ -1025,7 +1061,7 @@ def test_ssh_config_accepts_cli_overrides():
 
     assert goal == "check remote status"
     assert auto_mode is False
-    assert password_mode is False
+    assert sudo_password is None
     assert config == SSHConfig(
         ip="192.0.2.10",
         username="admin",
@@ -1121,35 +1157,36 @@ def test_tmux_reports_ssh_connection_errors(monkeypatch):
 
 
 def test_ssh_is_opt_in_and_uses_configured_defaults():
-    goal, config, auto_mode, password_mode = parse_cli_args(["check local status"])
+    goal, config, auto_mode, sudo_password = parse_cli_args(["check local status"])
     assert goal == "check local status"
     assert config is None
     assert auto_mode is False
-    assert password_mode is False
+    assert sudo_password is None
 
     with pytest.raises(SystemExit):
         parse_cli_args(["--ssh", "check remote status"])
 
-    goal, config, auto_mode, password_mode = parse_cli_args([
+    goal, config, auto_mode, sudo_password = parse_cli_args([
         "--ssh", "--ip", "172.16.42.1", "check remote status"
     ])
     assert goal == "check remote status"
     assert config == SSHConfig(ip="172.16.42.1")
     assert auto_mode is False
-    assert password_mode is False
+    assert sudo_password is None
 
 
-def test_cli_parses_automatic_and_secure_password_modes():
-    goal, config, auto_mode, password_mode = parse_cli_args([
+def test_cli_parses_auto_mode_and_sudo_password_value():
+    goal, config, auto_mode, sudo_password = parse_cli_args([
         "--auto",
         "--password",
+        "sudo-secret",
         "set up the requested service",
     ])
 
     assert goal == "set up the requested service"
     assert config is None
     assert auto_mode is True
-    assert password_mode is True
+    assert sudo_password == "sudo-secret"
 
 
 def test_ssh_requires_valid_ip_address():
@@ -1396,98 +1433,7 @@ def test_model_requested_credential_is_not_typed_into_terminal(monkeypatch):
     assert "will not type model-requested credentials" in result["error"]
 
 
-def test_terminal_password_prompt_requires_approval_before_credential(monkeypatch):
-    class FakeTmux:
-        def __init__(self):
-            self.sent_keys = []
-
-        @staticmethod
-        def get_target():
-            return "nyx:0.0", True
-
-        @staticmethod
-        def run_command(target, command, timeout, **kwargs):
-            return {
-                "output": "[sudo] password for kali:",
-                "exit_code": None,
-                "timed_out": False,
-                "human_input_needed": True,
-            }
-
-        def send_raw_keys(self, target, keys, **kwargs):
-            self.sent_keys.append((target, keys, kwargs))
-
-        def send_secret(self, target, secret, **kwargs):
-            self.sent_keys.append((target, "<secret>", kwargs))
-
-    tmux = FakeTmux()
-    executor = _make_executor_for_actions(
-        [
-            {"action": "run_command", "command": "sudo apt install docker-compose"},
-            {"action": "done", "status": "completed", "result": "Installed docker-compose."},
-        ],
-        tmux,
-    )
-    executor._password_mode = True
-    responses = iter(["yes", "secret"])
-    prompts = []
-    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
-    monkeypatch.setattr(
-        "executor.executor.request_human_input",
-        lambda kind, prompt: prompts.append((kind, prompt)) or next(responses),
-    )
-
-    result = executor.execute(Task(id="install-compose", description="Install docker-compose"))
-
-    assert result["status"] == "completed"
-    assert [kind for kind, _ in prompts] == ["approval", "credential"]
-    assert "Approve continuing with the privileged operation?" in prompts[0][1]
-    assert tmux.sent_keys == [("nyx:0.0", "<secret>", {})]
-
-
-def test_denied_privileged_command_is_canceled_without_requesting_password(monkeypatch):
-    class FakeTmux:
-        def __init__(self):
-            self.sent_keys = []
-
-        @staticmethod
-        def get_target():
-            return "nyx:0.0", True
-
-        @staticmethod
-        def run_command(target, command, timeout, **kwargs):
-            return {
-                "output": "[sudo] password for kali:",
-                "exit_code": None,
-                "timed_out": False,
-                "human_input_needed": True,
-            }
-
-        def send_raw_keys(self, target, keys, **kwargs):
-            self.sent_keys.append((target, keys, kwargs))
-
-    tmux = FakeTmux()
-    executor = _make_executor_for_actions(
-        [{"action": "run_command", "command": "sudo apt install docker-compose"}],
-        tmux,
-    )
-    executor._password_mode = True
-    prompts = []
-    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
-    monkeypatch.setattr(
-        "executor.executor.request_human_input",
-        lambda kind, prompt: prompts.append(kind) or "no",
-    )
-
-    result = executor.execute(Task(id="install-denied", description="Install docker-compose"))
-
-    assert result["status"] == "failed"
-    assert "did not approve" in result["error"]
-    assert prompts == ["approval"]
-    assert tmux.sent_keys == [("nyx:0.0", "C-c", {"enter": False})]
-
-
-def test_auto_password_mode_skips_privilege_approval_and_sends_secret(monkeypatch):
+def test_sudo_password_value_is_used_without_auto_mode_or_interactive_prompt(monkeypatch):
     class FakeTmux:
         def __init__(self):
             self.sent = []
@@ -1519,8 +1465,7 @@ def test_auto_password_mode_skips_privilege_approval_and_sends_secret(monkeypatc
         ],
         tmux,
     )
-    executor._auto_mode = True
-    executor._password_mode = True
+    executor._sudo_password = "sudo-secret"
     calls = []
     monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
     monkeypatch.setattr(
@@ -1531,11 +1476,11 @@ def test_auto_password_mode_skips_privilege_approval_and_sends_secret(monkeypatc
     result = executor.execute(Task(id="auto-sudo", description="Install package"))
 
     assert result["status"] == "completed"
-    assert calls == ["credential"]
+    assert calls == []
     assert tmux.sent == [("nyx:0.0", "sudo-secret", {})]
 
 
-def test_sudo_password_prompt_is_canceled_without_password_mode(monkeypatch):
+def test_sudo_password_prompt_is_canceled_without_password_value(monkeypatch):
     class FakeTmux:
         def __init__(self):
             self.sent = []
@@ -1566,7 +1511,7 @@ def test_sudo_password_prompt_is_canceled_without_password_mode(monkeypatch):
     result = executor.execute(Task(id="sudo-no-password-mode", description="Install package"))
 
     assert result["status"] == "failed"
-    assert "--password" in result["error"]
+    assert "--password PASSWORD" in result["error"]
     assert tmux.sent == [("nyx:0.0", "C-c", {"enter": False})]
 
 
@@ -1621,6 +1566,8 @@ def test_orchestrator_stops_run_after_high_risk_command_is_blocked(tmp_path, mon
     assert task is not None
     assert task.status.value == "failed"
     assert task.retries == 0
+    assert "TASK OUTCOME danger: status=failed" in orchestrator._recent_terminal_context[0]
+    assert "Partition editing is blocked." in orchestrator._recent_terminal_context[0]
     assert len(plan_calls) == 1
     assert finishes == [{
         "success": False,
@@ -1713,26 +1660,56 @@ def test_executor_reads_rewrites_and_verifies_entire_multiline_file(monkeypatch)
     assert Executor._has_write_step(executor._last_step_log)
 
 
-def test_executor_requires_read_of_exact_path_before_file_replacement(monkeypatch):
+def test_executor_recovers_from_write_before_read_by_reading_exact_path(monkeypatch):
+    content = "print('new')\n"
+
     class FakeTmux:
+        def __init__(self):
+            self.commands = []
+
         @staticmethod
         def get_target():
             return "nyx:0.0", True
 
-        @staticmethod
-        def run_command(*args, **kwargs):
-            pytest.fail("write without reading the exact target must be refused")
+        def run_command(self, target, command, timeout, **kwargs):
+            self.commands.append((command, kwargs))
+            if len(self.commands) == 1:
+                return {
+                    "output": MISSING_FILE_SENTINEL,
+                    "exit_code": 0,
+                    "timed_out": False,
+                }
+            if len(self.commands) == 2:
+                return {
+                    "output": "Atomic file replacement completed",
+                    "exit_code": 0,
+                    "timed_out": False,
+                }
+            return {
+                "output": base64.b64encode(content.encode()).decode(),
+                "exit_code": 0,
+                "timed_out": False,
+            }
 
+    tmux = FakeTmux()
     executor = _make_executor_for_actions(
-        [{"action": "write_file", "path": "other.py", "content": "print('new')\n"}],
-        FakeTmux(),
+        [
+            {"action": "write_file", "path": "other.py", "content": content},
+            {"action": "read_file", "path": "other.py"},
+            {"action": "write_file", "path": "other.py", "content": content},
+            {"action": "done", "status": "completed", "result": "Created other.py."},
+        ],
+        tmux,
     )
     monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
 
     result = executor.execute(Task(id="wrong-path", description="Update app.py"))
 
-    assert result["status"] == "failed"
-    assert "Read other.py successfully before writing it" in result["error"]
+    assert result["status"] == "completed"
+    assert len(tmux.commands) == 3
+    assert "Read other.py successfully before writing it" in executor._last_step_log[0]["output"]
+    assert executor._last_step_log[1]["file_operation"] == "read"
+    assert executor._last_step_log[2]["file_operation"] == "write"
 
 
 def test_docker_setup_rejects_compose_file_write_unless_requested(monkeypatch):
