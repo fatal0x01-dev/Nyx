@@ -140,6 +140,23 @@ host-key confirmation prompts are handled in the terminal during connection.
 After connection, planning and task validation are told which remote host is
 active, and executor commands run in that remote shell.
 
+### Autonomous prompt and sudo password modes
+
+Use `--auto` to automatically answer detected terminal confirmations and
+executor approval requests. This is a high-risk opt-in: it can accept
+destructive interactive confirmations. Nyx's existing command safety blocks
+remain in effect.
+
+Use `--password` to allow secure, hidden entry of a sudo password only when
+the terminal requests it. Nyx does not accept the password as a CLI value; it
+is sent through a temporary tmux buffer rather than exposed in process
+arguments. Without `--password`, Nyx cancels sudo password prompts. Combine
+the flags when both behaviors are wanted:
+
+```bash
+./run_nyx.sh --auto --password "install and configure the requested service"
+```
+
 ## Project structure
 
 ```text

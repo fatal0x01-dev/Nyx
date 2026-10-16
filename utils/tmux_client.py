@@ -43,6 +43,20 @@ class TmuxError(RuntimeError):
 class TmuxClient:
     def __init__(self, session_name: str = "nyx"):
         self._session_name = session_name
+        self._auto_mode = False
+        self._password_mode = False
+
+    def configure_input_modes(self, auto_mode: bool, password_mode: bool) -> None:
+        self._auto_mode = auto_mode
+        self._password_mode = password_mode
+
+    @staticmethod
+    def _automatic_prompt_response(kind: str, prompt: str) -> str:
+        if kind == "unsafe_confirmation" and re.search(
+            r"ignore\s*/\s*cancel", prompt, re.IGNORECASE
+        ):
+            return "i"
+        return "y"
 
     # ── Availability ─────────────────────────────────────────────────
 
@@ -192,7 +206,16 @@ class TmuxClient:
             input_need = detect_human_input_need(last_output)
             if input_need is not None and input_need["prompt"] != last_prompt:
                 last_prompt = input_need["prompt"]
-                response = request_human_input(input_need["kind"], input_need["prompt"])
+                if self._auto_mode and input_need["kind"] != "credential":
+                    response = self._automatic_prompt_response(
+                        input_need["kind"],
+                        input_need["prompt"],
+                    )
+                else:
+                    response = request_human_input(
+                        input_need["kind"],
+                        input_need["prompt"],
+                    )
                 self.send_raw_keys(target, response)
 
         message = (
@@ -311,6 +334,7 @@ class TmuxClient:
         new_text = ""
         pager_dismissed = False
         install_confirmation_sent = False
+        auto_prompt_answers: set[tuple[str, str]] = set()
 
         while time.time() < deadline:
             time.sleep(poll_interval)
@@ -335,6 +359,38 @@ class TmuxClient:
             input_need = detect_human_input_need(current_output)
             if input_need is not None:
                 if input_need["kind"] == "unsafe_confirmation":
+                    if self._auto_mode:
+                        prompt_key = (input_need["kind"], input_need["prompt"])
+                        if prompt_key in auto_prompt_answers:
+                            canceled_output, canceled_exit_code, still_running = (
+                                self._interrupt_and_collect(
+                                    target,
+                                    start_marker,
+                                    sentinel,
+                                    current_output,
+                                    poll_interval,
+                                )
+                            )
+                            return {
+                                "output": (
+                                    f"{canceled_output}\nNyx could not clear a repeated "
+                                    "confirmation prompt."
+                                ).strip(),
+                                "exit_code": canceled_exit_code,
+                                "timed_out": still_running,
+                                "human_input_needed": False,
+                                "safety_interrupted": True,
+                                "safety_halt": still_running,
+                            }
+                        auto_prompt_answers.add(prompt_key)
+                        self.send_raw_keys(
+                            target,
+                            self._automatic_prompt_response(
+                                input_need["kind"],
+                                input_need["prompt"],
+                            ),
+                        )
+                        continue
                     canceled_output, canceled_exit_code, still_running = (
                         self._interrupt_and_collect(
                             target,
@@ -358,6 +414,38 @@ class TmuxClient:
                     if not install_confirmation_sent:
                         self.send_raw_keys(target, "y")
                         install_confirmation_sent = True
+                    continue
+                if self._auto_mode and input_need["kind"] == "approval":
+                    prompt_key = (input_need["kind"], input_need["prompt"])
+                    if prompt_key in auto_prompt_answers:
+                        canceled_output, canceled_exit_code, still_running = (
+                            self._interrupt_and_collect(
+                                target,
+                                start_marker,
+                                sentinel,
+                                current_output,
+                                poll_interval,
+                            )
+                        )
+                        return {
+                            "output": (
+                                f"{canceled_output}\nNyx could not clear a repeated "
+                                "approval prompt."
+                            ).strip(),
+                            "exit_code": canceled_exit_code,
+                            "timed_out": still_running,
+                            "human_input_needed": False,
+                            "safety_interrupted": True,
+                            "safety_halt": still_running,
+                        }
+                    auto_prompt_answers.add(prompt_key)
+                    self.send_raw_keys(
+                        target,
+                        self._automatic_prompt_response(
+                            input_need["kind"],
+                            input_need["prompt"],
+                        ),
+                    )
                     continue
                 return {
                     "output": current_output,
@@ -409,6 +497,40 @@ class TmuxClient:
         if enter:
             args.append("Enter")
         self._run(args)
+
+    def send_secret(self, target: str, secret: str, enter: bool = True) -> None:
+        """Paste a secret through a temporary tmux buffer, not process arguments."""
+        buffer_name = f"nyx-secret-{uuid.uuid4().hex}"
+        try:
+            result = subprocess.run(
+                ["tmux", "load-buffer", "-b", buffer_name, "-"],
+                input=secret,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as error:
+            raise TmuxError(f"Could not securely load terminal credential: {error}") from error
+        if result.returncode != 0:
+            raise TmuxError(
+                "Could not securely load terminal credential: "
+                f"{result.stderr.strip()}"
+            )
+
+        try:
+            self._run([
+                "paste-buffer",
+                "-d",
+                "-b",
+                buffer_name,
+                "-t",
+                target,
+            ])
+        except TmuxError:
+            self._run(["delete-buffer", "-b", buffer_name])
+            raise
+        if enter:
+            self._run(["send-keys", "-t", target, "Enter"])
 
     def attach_hint(self, target: str) -> str:
         session = target.split(":")[0]

@@ -58,3 +58,14 @@ def test_invalid_approval_reprompts_instead_of_typing_arbitrary_text(monkeypatch
     assert request_human_input("approval", "Continue? [y/n]") == "y"
     assert len(prompts) == 2
     assert all("[y/n]" in prompt for prompt in prompts)
+
+
+def test_credential_input_is_hidden(monkeypatch):
+    captured = []
+    monkeypatch.setattr(
+        "utils.human_input.getpass.getpass",
+        lambda prompt: captured.append(prompt) or "secret",
+    )
+
+    assert request_human_input("credential", "sudo password") == "secret"
+    assert captured == ["Enter credential (input hidden): "]

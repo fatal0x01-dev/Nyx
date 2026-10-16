@@ -181,6 +181,8 @@ def test_executor_finishes_basic_connectivity_task_after_one_successful_ping(mon
     executor._remote_context = ""
     executor._control_plane = None
     executor._control_run_id = None
+    executor._auto_mode = False
+    executor._password_mode = False
     monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
     monkeypatch.setattr(
         executor,
@@ -777,6 +779,40 @@ def test_tmux_accepts_command_not_found_package_install_prompt_once(monkeypatch)
     ] == ["y"]
 
 
+def test_tmux_auto_accepts_detected_and_unsafe_prompts(monkeypatch):
+    client = TmuxClient()
+    client.configure_input_modes(auto_mode=True, password_mode=False)
+    commands = []
+    markers = {}
+    capture_count = 0
+
+    def fake_run(args):
+        commands.append(args)
+        if args[0] == "send-keys" and "Enter" in args and "__NYX_START_" in args[3]:
+            markers["start"] = re.search(r"__NYX_START_[a-f0-9]+__", args[3]).group(0)
+            markers["done"] = re.search(r"__NYX_DONE_[a-f0-9]+__", args[3]).group(0)
+        return ""
+
+    def fake_capture_screen(target):
+        nonlocal capture_count
+        capture_count += 1
+        if capture_count == 1:
+            return f"{markers['start']}\nWrite changes? (y/n)"
+        if capture_count == 2:
+            return f"{markers['start']}\nIgnore/Cancel?"
+        return f"{markers['start']}\ndone\n{markers['done']}_0"
+
+    monkeypatch.setattr(client, "_run", fake_run)
+    monkeypatch.setattr(client, "capture_screen", fake_capture_screen)
+    monkeypatch.setattr("utils.tmux_client.time.sleep", lambda _: None)
+
+    result = client.run_command("nyx:0.0", "interactive command", poll_interval=0)
+
+    assert result["exit_code"] == 0
+    assert ["send-keys", "-t", "nyx:0.0", "y", "Enter"] in commands
+    assert ["send-keys", "-t", "nyx:0.0", "i", "Enter"] in commands
+
+
 def test_tmux_reports_waiting_password_prompt(monkeypatch):
     client = TmuxClient()
     markers = {}
@@ -972,7 +1008,7 @@ def test_ssh_config_builds_requested_rsa_compatible_remote_shell_command():
 
 
 def test_ssh_config_accepts_cli_overrides():
-    goal, config = parse_cli_args([
+    goal, config, auto_mode, password_mode = parse_cli_args([
         "--ssh",
         "--ip",
         "192.0.2.10",
@@ -988,6 +1024,8 @@ def test_ssh_config_accepts_cli_overrides():
     ])
 
     assert goal == "check remote status"
+    assert auto_mode is False
+    assert password_mode is False
     assert config == SSHConfig(
         ip="192.0.2.10",
         username="admin",
@@ -1039,6 +1077,27 @@ def test_tmux_creates_ssh_window_in_pane_session(monkeypatch):
     ]
 
 
+def test_tmux_sends_secret_without_putting_it_in_process_arguments(monkeypatch):
+    client = TmuxClient()
+    calls = []
+
+    def fake_subprocess_run(args, **kwargs):
+        calls.append((args, kwargs))
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr("utils.tmux_client.subprocess.run", fake_subprocess_run)
+    monkeypatch.setattr(client, "_run", lambda args: calls.append((args, {})) or "")
+
+    client.send_secret("nyx:0.0", "not-in-argv")
+
+    assert calls[0][0][:3] == ["tmux", "load-buffer", "-b"]
+    assert calls[0][0][-1] == "-"
+    assert calls[0][1]["input"] == "not-in-argv"
+    assert "not-in-argv" not in calls[0][0]
+    assert calls[1][0][:2] == ["paste-buffer", "-d"]
+    assert calls[2][0] == ["send-keys", "-t", "nyx:0.0", "Enter"]
+
+
 def test_tmux_reports_ssh_connection_errors(monkeypatch):
     client = TmuxClient()
     sent_commands = []
@@ -1062,16 +1121,35 @@ def test_tmux_reports_ssh_connection_errors(monkeypatch):
 
 
 def test_ssh_is_opt_in_and_uses_configured_defaults():
-    goal, config = parse_cli_args(["check local status"])
+    goal, config, auto_mode, password_mode = parse_cli_args(["check local status"])
     assert goal == "check local status"
     assert config is None
+    assert auto_mode is False
+    assert password_mode is False
 
     with pytest.raises(SystemExit):
         parse_cli_args(["--ssh", "check remote status"])
 
-    goal, config = parse_cli_args(["--ssh", "--ip", "172.16.42.1", "check remote status"])
+    goal, config, auto_mode, password_mode = parse_cli_args([
+        "--ssh", "--ip", "172.16.42.1", "check remote status"
+    ])
     assert goal == "check remote status"
     assert config == SSHConfig(ip="172.16.42.1")
+    assert auto_mode is False
+    assert password_mode is False
+
+
+def test_cli_parses_automatic_and_secure_password_modes():
+    goal, config, auto_mode, password_mode = parse_cli_args([
+        "--auto",
+        "--password",
+        "set up the requested service",
+    ])
+
+    assert goal == "set up the requested service"
+    assert config is None
+    assert auto_mode is True
+    assert password_mode is True
 
 
 def test_ssh_requires_valid_ip_address():
@@ -1233,6 +1311,38 @@ def test_model_approval_is_not_sent_as_terminal_keystrokes(monkeypatch):
     }]
 
 
+def test_auto_mode_accepts_model_approval_without_prompting_user(monkeypatch):
+    class FakeTmux:
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+    executor = _make_executor_for_actions(
+        [
+            {
+                "action": "human_input",
+                "kind": "approval",
+                "prompt": "Approve the requested operation?",
+            },
+            {"action": "done", "status": "completed", "result": "Operation completed."},
+        ],
+        FakeTmux(),
+    )
+    executor._auto_mode = True
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+    monkeypatch.setattr(
+        "executor.executor.request_human_input",
+        lambda *args: pytest.fail("auto mode must not prompt for approval"),
+    )
+
+    result = executor.execute(Task(id="auto-approval", description="Perform operation"))
+
+    assert result["status"] == "completed"
+    assert executor._last_step_log[0]["output"] == (
+        "User approved: Approve the requested operation?"
+    )
+
+
 def test_repeated_model_approval_request_stops_without_reprompting(monkeypatch):
     class FakeTmux:
         @staticmethod
@@ -1307,6 +1417,9 @@ def test_terminal_password_prompt_requires_approval_before_credential(monkeypatc
         def send_raw_keys(self, target, keys, **kwargs):
             self.sent_keys.append((target, keys, kwargs))
 
+        def send_secret(self, target, secret, **kwargs):
+            self.sent_keys.append((target, "<secret>", kwargs))
+
     tmux = FakeTmux()
     executor = _make_executor_for_actions(
         [
@@ -1315,6 +1428,7 @@ def test_terminal_password_prompt_requires_approval_before_credential(monkeypatc
         ],
         tmux,
     )
+    executor._password_mode = True
     responses = iter(["yes", "secret"])
     prompts = []
     monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
@@ -1328,7 +1442,7 @@ def test_terminal_password_prompt_requires_approval_before_credential(monkeypatc
     assert result["status"] == "completed"
     assert [kind for kind, _ in prompts] == ["approval", "credential"]
     assert "Approve continuing with the privileged operation?" in prompts[0][1]
-    assert tmux.sent_keys == [("nyx:0.0", "secret", {})]
+    assert tmux.sent_keys == [("nyx:0.0", "<secret>", {})]
 
 
 def test_denied_privileged_command_is_canceled_without_requesting_password(monkeypatch):
@@ -1357,6 +1471,7 @@ def test_denied_privileged_command_is_canceled_without_requesting_password(monke
         [{"action": "run_command", "command": "sudo apt install docker-compose"}],
         tmux,
     )
+    executor._password_mode = True
     prompts = []
     monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
     monkeypatch.setattr(
@@ -1370,6 +1485,89 @@ def test_denied_privileged_command_is_canceled_without_requesting_password(monke
     assert "did not approve" in result["error"]
     assert prompts == ["approval"]
     assert tmux.sent_keys == [("nyx:0.0", "C-c", {"enter": False})]
+
+
+def test_auto_password_mode_skips_privilege_approval_and_sends_secret(monkeypatch):
+    class FakeTmux:
+        def __init__(self):
+            self.sent = []
+
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+        @staticmethod
+        def run_command(target, command, timeout, **kwargs):
+            return {
+                "output": "[sudo] password for kali:",
+                "exit_code": None,
+                "timed_out": False,
+                "human_input_needed": True,
+            }
+
+        def send_secret(self, target, secret, **kwargs):
+            self.sent.append((target, secret, kwargs))
+
+        def send_raw_keys(self, target, keys, **kwargs):
+            self.sent.append((target, keys, kwargs))
+
+    tmux = FakeTmux()
+    executor = _make_executor_for_actions(
+        [
+            {"action": "run_command", "command": "sudo apt install package"},
+            {"action": "done", "status": "completed", "result": "Installed package."},
+        ],
+        tmux,
+    )
+    executor._auto_mode = True
+    executor._password_mode = True
+    calls = []
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+    monkeypatch.setattr(
+        "executor.executor.request_human_input",
+        lambda kind, prompt: calls.append(kind) or "sudo-secret",
+    )
+
+    result = executor.execute(Task(id="auto-sudo", description="Install package"))
+
+    assert result["status"] == "completed"
+    assert calls == ["credential"]
+    assert tmux.sent == [("nyx:0.0", "sudo-secret", {})]
+
+
+def test_sudo_password_prompt_is_canceled_without_password_mode(monkeypatch):
+    class FakeTmux:
+        def __init__(self):
+            self.sent = []
+
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+        @staticmethod
+        def run_command(target, command, timeout, **kwargs):
+            return {
+                "output": "[sudo] password for kali:",
+                "exit_code": None,
+                "timed_out": False,
+                "human_input_needed": True,
+            }
+
+        def send_raw_keys(self, target, keys, **kwargs):
+            self.sent.append((target, keys, kwargs))
+
+    tmux = FakeTmux()
+    executor = _make_executor_for_actions(
+        [{"action": "run_command", "command": "sudo apt install package"}],
+        tmux,
+    )
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+
+    result = executor.execute(Task(id="sudo-no-password-mode", description="Install package"))
+
+    assert result["status"] == "failed"
+    assert "--password" in result["error"]
+    assert tmux.sent == [("nyx:0.0", "C-c", {"enter": False})]
 
 
 def test_orchestrator_stops_run_after_high_risk_command_is_blocked(tmp_path, monkeypatch):

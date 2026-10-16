@@ -69,7 +69,13 @@ class Orchestrator:
 
     # ── Entry point ───────────────────────────────────────────────────────
 
-    def run(self, goal: str, ssh_config: SSHConfig | None = None):
+    def run(
+        self,
+        goal: str,
+        ssh_config: SSHConfig | None = None,
+        auto_mode: bool = False,
+        password_mode: bool = False,
+    ):
         """Start the orchestration loop for a given goal."""
         self._goal = goal
         self._iteration = 0
@@ -79,6 +85,13 @@ class Orchestrator:
         self._run_id = new_id()
         self._control.start_run(self._run_id, goal)
         self._executor.configure_control_plane(self._control, self._run_id)
+        self._executor.configure_input_modes(auto_mode, password_mode)
+        if auto_mode:
+            log.warning(
+                "AUTONOMOUS MODE ENABLED: Nyx will automatically accept detected prompts."
+            )
+        if password_mode:
+            log.info("Secure sudo password entry is enabled and will be requested only when needed.")
         self._publish_report()
 
         log.info("=" * 60)
@@ -534,10 +547,25 @@ class Orchestrator:
             )
             self._publish_report()
 
-def parse_cli_args(argv: list[str] | None = None) -> tuple[str, SSHConfig | None]:
+def parse_cli_args(
+    argv: list[str] | None = None,
+) -> tuple[str, SSHConfig | None, bool, bool]:
     """Parse the goal and optional SSH connection parameters."""
     parser = argparse.ArgumentParser(description="Run Nyx against a local or SSH terminal.")
     parser.add_argument("--ssh", action="store_true", help="Connect to the IP supplied with --ip before planning.")
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help=(
+            "Automatically accept detected terminal and executor approval prompts, "
+            "including destructive confirmations."
+        ),
+    )
+    parser.add_argument(
+        "--password",
+        action="store_true",
+        help="Allow secure hidden entry of sudo passwords when requested by the terminal.",
+    )
     parser.add_argument("--ip", help="Required IP address for the SSH destination.")
     parser.add_argument("--ssh-user", help=f"SSH username (default: {cfg.SSH_DEFAULT_USER})")
     parser.add_argument("--ssh-port", type=int, help="SSH port")
@@ -575,12 +603,12 @@ def parse_cli_args(argv: list[str] | None = None) -> tuple[str, SSHConfig | None
         except ValueError as e:
             parser.error(str(e))
 
-    return " ".join(args.goal).strip(), ssh_config
+    return " ".join(args.goal).strip(), ssh_config, args.auto, args.password
 
 
 def main():
     """CLI entry point."""
-    goal, ssh_config = parse_cli_args()
+    goal, ssh_config, auto_mode, password_mode = parse_cli_args()
     if not goal:
         goal = input("Enter goal: ").strip()
 
@@ -589,7 +617,12 @@ def main():
         sys.exit(1)
 
     orchestrator = Orchestrator()
-    orchestrator.run(goal, ssh_config=ssh_config)
+    orchestrator.run(
+        goal,
+        ssh_config=ssh_config,
+        auto_mode=auto_mode,
+        password_mode=password_mode,
+    )
 
 
 if __name__ == "__main__":

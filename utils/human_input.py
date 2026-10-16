@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import sys
+import getpass
 from typing import Any
 
 APPROVAL_PATTERNS = [
@@ -95,9 +96,10 @@ def request_human_input(kind: str, prompt: str) -> str:
     print(f"Context: {prompt}", file=sys.stderr)
 
     while True:
-        answer = input(
-            "Enter response [y/n]: " if kind == "approval" else "Enter response: "
-        ).strip()
+        if kind == "credential":
+            answer = getpass.getpass("Enter credential (input hidden): ").strip()
+        else:
+            answer = input("Enter response [y/n]: ").strip()
         if kind == "approval":
             normalized = answer.casefold()
             if normalized in {"y", "yes", "approve", "approved"}:

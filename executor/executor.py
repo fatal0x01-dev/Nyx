@@ -82,6 +82,8 @@ class Executor:
         self._remote_context: str = ""
         self._control_plane: ControlPlane | None = None
         self._control_run_id: str | None = None
+        self._auto_mode = False
+        self._password_mode = False
 
         log.info(
             "Executor ready — %s model=%s (tmux-driven)",
@@ -333,6 +335,11 @@ class Executor:
     def configure_control_plane(self, control_plane: ControlPlane, run_id: str) -> None:
         self._control_plane = control_plane
         self._control_run_id = run_id
+
+    def configure_input_modes(self, auto_mode: bool, password_mode: bool) -> None:
+        self._auto_mode = auto_mode
+        self._password_mode = password_mode
+        self._tmux.configure_input_modes(auto_mode, password_mode)
 
     def _control_checkpoint(self, task: Task, phase: str) -> str:
         if self._control_plane is None or self._control_run_id is None:
@@ -1074,7 +1081,15 @@ class Executor:
                         ),
                     }
 
-                human_response = request_human_input(input_kind, prompt).strip().lower()
+                if getattr(self, "_auto_mode", False):
+                    human_response = "y"
+                    log.warning(
+                        "Task %s: --auto accepted the executor's approval request: %s",
+                        task.id,
+                        prompt,
+                    )
+                else:
+                    human_response = request_human_input(input_kind, prompt).strip().lower()
                 if human_response not in {"y", "yes", "approve", "approved"}:
                     step_log.append({
                         "command": "<human_input approval>",
@@ -1273,23 +1288,12 @@ class Executor:
                             re.IGNORECASE,
                         )
                         if input_info["kind"] == "credential" and is_password_prompt:
-                            approval_prompt = (
-                                "This command requires elevated privileges and is waiting "
-                                f"for a password: {input_info['prompt']}. "
-                                "Approve continuing with the privileged operation?"
-                            )
-                            approval = request_human_input("approval", approval_prompt)
-                            if approval.strip().casefold() not in {
-                                "y",
-                                "yes",
-                                "approve",
-                                "approved",
-                            }:
+                            if not getattr(self, "_password_mode", False):
                                 try:
                                     self._tmux.send_raw_keys(target, "C-c", enter=False)
                                 except TmuxError as e:
                                     log.error(
-                                        "Task %s: could not cancel after privilege was denied: %s",
+                                        "Task %s: could not cancel sudo password prompt: %s",
                                         task.id,
                                         e,
                                     )
@@ -1297,25 +1301,74 @@ class Executor:
                                         "status": "failed",
                                         "result": "",
                                         "error": (
-                                            "Privilege was denied, and the waiting command "
-                                            f"could not be canceled: {e}"
+                                            "Could not cancel the sudo password prompt; "
+                                            f"terminal state is unknown: {e}"
                                         ),
                                         "safety_halt": True,
                                     }
                                 step_log.append({
                                     "command": command,
-                                    "output": "User denied the privileged operation; command canceled.",
+                                    "output": (
+                                        "Sudo password prompt canceled because --password "
+                                        "was not enabled."
+                                    ),
                                     "exit_code": 130,
                                     "timed_out": False,
-                                    "safety_blocked": True,
+                                    "credential_blocked": True,
                                 })
                                 self._last_step_log = list(step_log)
                                 return {
                                     "status": "failed",
                                     "result": "",
-                                    "error": "The user did not approve the privileged operation.",
-                                    "safety_blocked": True,
+                                    "error": (
+                                        "A sudo password is required. Run Nyx with "
+                                        "--password to allow secure password entry."
+                                    ),
                                 }
+                            if not getattr(self, "_auto_mode", False):
+                                approval_prompt = (
+                                    "This command requires elevated privileges and is waiting "
+                                    f"for a password: {input_info['prompt']}. "
+                                    "Approve continuing with the privileged operation?"
+                                )
+                                approval = request_human_input("approval", approval_prompt)
+                                if approval.strip().casefold() not in {
+                                    "y",
+                                    "yes",
+                                    "approve",
+                                    "approved",
+                                }:
+                                    try:
+                                        self._tmux.send_raw_keys(target, "C-c", enter=False)
+                                    except TmuxError as e:
+                                        log.error(
+                                            "Task %s: could not cancel after privilege was denied: %s",
+                                            task.id,
+                                            e,
+                                        )
+                                        return {
+                                            "status": "failed",
+                                            "result": "",
+                                            "error": (
+                                                "Privilege was denied, and the waiting command "
+                                                f"could not be canceled: {e}"
+                                            ),
+                                            "safety_halt": True,
+                                        }
+                                    step_log.append({
+                                        "command": command,
+                                        "output": "User denied the privileged operation; command canceled.",
+                                        "exit_code": 130,
+                                        "timed_out": False,
+                                        "safety_blocked": True,
+                                    })
+                                    self._last_step_log = list(step_log)
+                                    return {
+                                        "status": "failed",
+                                        "result": "",
+                                        "error": "The user did not approve the privileged operation.",
+                                        "safety_blocked": True,
+                                    }
                             human_response = request_human_input(
                                 "credential",
                                 input_info["prompt"],
@@ -1326,7 +1379,13 @@ class Executor:
                                 input_info["prompt"],
                             )
                         try:
-                            self._tmux.send_raw_keys(target, human_response)
+                            if (
+                                input_info["kind"] == "credential"
+                                and is_password_prompt
+                            ):
+                                self._tmux.send_secret(target, human_response)
+                            else:
+                                self._tmux.send_raw_keys(target, human_response)
                         except TmuxError as e:
                             log.error("Task %s: failed to send prompted response: %s", task.id, e)
                             return {"status": "failed", "result": "", "error": str(e)}
