@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import base64
 import re
 import threading
 import time
@@ -359,6 +360,42 @@ def test_tmux_command_result_works_when_start_marker_scrolled_off_screen():
         "current command output",
         1,
     )
+
+
+def test_tmux_command_result_uses_actual_start_marker_not_echoed_wrapper():
+    lines = [
+        "shell$ printf '__NYX_START_token__'; eval '...'",
+        "__NYX_START_token__",
+        "captured output",
+        "__NYX_DONE_token___0",
+    ]
+
+    assert TmuxClient._command_result(
+        lines,
+        "__NYX_START_token__",
+        "__NYX_DONE_token__",
+    ) == ("captured output", 0)
+
+
+def test_tmux_capture_history_is_explicitly_opt_in(monkeypatch):
+    client = TmuxClient()
+    captured = []
+    monkeypatch.setattr(client, "_run", lambda args: captured.extend(args) or "output")
+
+    assert client.capture_screen("nyx:0.0") == "output"
+    assert captured == ["capture-pane", "-t", "nyx:0.0", "-p"]
+
+    captured.clear()
+    assert client.capture_screen("nyx:0.0", include_history=True) == "output"
+    assert captured == [
+        "capture-pane",
+        "-t",
+        "nyx:0.0",
+        "-p",
+        "-J",
+        "-S",
+        "-",
+    ]
 
 
 def test_tmux_detects_common_pager_screens():
@@ -915,6 +952,118 @@ def test_file_edit_tasks_refuse_non_write_actions():
         task,
         [{"command": "docker-compose config", "output": "name: ubuntu-docker\nservices:\n  ubuntu: ..."}],
     ) is True
+
+
+def test_file_task_detection_and_shell_edits_are_routed_to_file_actions():
+    assert Executor._requires_file_write("Update src/service.py")
+    assert Executor._requires_file_write("Create a new text file")
+    assert Executor._is_file_write_command("sed -i 's/old/new/' config.py")
+    assert Executor._is_file_write_command("echo 'new value' > config.ini")
+    assert Executor._is_file_write_command("printf 'first\\nsecond\\n' >> app.txt")
+    assert Executor._is_file_write_command("cat <<'EOF' > config.yml")
+    assert Executor._is_file_write_command("tee config.txt")
+    assert Executor._is_file_write_command("perl -pi -e 's/a/b/' app.py")
+    assert not Executor._is_file_write_command("sed -n '1,20p' app.py")
+    assert not Executor._is_file_write_command("python3 -m py_compile app.py")
+
+
+def test_executor_reads_rewrites_and_verifies_entire_multiline_file(monkeypatch):
+    original = "first=old\nsecond=old\nthird=keep\n"
+    updated = "first=new\nsecond=updated\nthird=keep\nfourth=added\n"
+
+    class FakeTmux:
+        def __init__(self):
+            self.commands = []
+
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+        def run_command(self, target, command, timeout, **kwargs):
+            self.commands.append((command, kwargs))
+            if len(self.commands) == 1:
+                return {
+                    "output": base64.b64encode(original.encode()).decode(),
+                    "exit_code": 0,
+                    "timed_out": False,
+                }
+            if len(self.commands) == 2:
+                return {
+                    "output": "Atomic file replacement completed",
+                    "exit_code": 0,
+                    "timed_out": False,
+                }
+            return {
+                "output": base64.b64encode(updated.encode()).decode(),
+                "exit_code": 0,
+                "timed_out": False,
+            }
+
+    tmux = FakeTmux()
+    executor = _make_executor_for_actions(
+        [
+            {"action": "read_file", "path": "config/settings.ini"},
+            {"action": "write_file", "path": "config/settings.ini", "content": updated},
+            {"action": "done", "status": "completed", "result": "Updated configuration."},
+        ],
+        tmux,
+    )
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+
+    result = executor.execute(Task(id="edit", description="Update config/settings.ini"))
+
+    assert result["status"] == "completed"
+    assert len(tmux.commands) == 3
+    assert tmux.commands[0][1]["capture_history"] is True
+    assert tmux.commands[2][1]["capture_history"] is True
+    assert "first=old\nsecond=old\nthird=keep\n" in executor._last_step_log[0]["output"]
+    assert executor._last_step_log[1]["file_operation"] == "write"
+    assert "matched the complete requested file contents" in executor._last_step_log[2]["output"]
+    assert Executor._has_write_step(executor._last_step_log)
+
+
+def test_executor_requires_read_of_exact_path_before_file_replacement(monkeypatch):
+    class FakeTmux:
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+        @staticmethod
+        def run_command(*args, **kwargs):
+            pytest.fail("write without reading the exact target must be refused")
+
+    executor = _make_executor_for_actions(
+        [{"action": "write_file", "path": "other.py", "content": "print('new')\n"}],
+        FakeTmux(),
+    )
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+
+    result = executor.execute(Task(id="wrong-path", description="Update app.py"))
+
+    assert result["status"] == "failed"
+    assert "Read other.py successfully before writing it" in result["error"]
+
+
+def test_executor_rejects_shell_based_file_modification(monkeypatch):
+    class FakeTmux:
+        @staticmethod
+        def get_target():
+            return "nyx:0.0", True
+
+        @staticmethod
+        def run_command(*args, **kwargs):
+            pytest.fail("sed -i must never reach tmux in a file-edit task")
+
+    executor = _make_executor_for_actions(
+        [{"action": "run_command", "command": "sed -i 's/old/new/' app.py"}],
+        FakeTmux(),
+    )
+    monkeypatch.setattr(TmuxClient, "is_installed", staticmethod(lambda: True))
+
+    result = executor.execute(Task(id="sed-edit", description="Update app.py"))
+
+    assert result["status"] == "failed"
+    assert "Shell-based file modification is disabled" in result["error"]
 
 
 def test_compose_task_requires_matching_service_name():

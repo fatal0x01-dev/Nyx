@@ -139,8 +139,11 @@ class TmuxClient:
 
     # ── Reading state ─────────────────────────────────────────────────
 
-    def capture_screen(self, target: str) -> str:
-        return self._run(["capture-pane", "-t", target, "-p"])
+    def capture_screen(self, target: str, include_history: bool = False) -> str:
+        args = ["capture-pane", "-t", target, "-p"]
+        if include_history:
+            args.extend(["-J", "-S", "-"])
+        return self._run(args)
 
     def start_ssh(
         self,
@@ -202,11 +205,14 @@ class TmuxClient:
     @staticmethod
     def _command_result(lines: list[str], start_marker: str, sentinel: str) -> tuple[str, int | None] | None:
         """Extract a command's visible output and exit code from the current screen."""
-        start_index = next((i for i, line in enumerate(lines) if start_marker in line), -1)
         end_index = next((i for i, line in enumerate(lines) if sentinel in line), -1)
         if end_index < 0:
             return None
 
+        start_index = max(
+            (i for i, line in enumerate(lines[:end_index]) if start_marker in line),
+            default=-1,
+        )
         output_start = start_index + 1 if 0 <= start_index < end_index else 0
         output = "\n".join(lines[output_start:end_index]).strip()
         try:
@@ -263,6 +269,7 @@ class TmuxClient:
         command: str,
         timeout: float = 120.0,
         poll_interval: float = 0.4,
+        capture_history: bool = False,
     ) -> dict:
         """
         Type `command` into the pane, press Enter, and wait for it to
@@ -293,8 +300,16 @@ class TmuxClient:
 
         while time.time() < deadline:
             time.sleep(poll_interval)
-            lines = self.capture_screen(target).splitlines()
-            start_index = next((i for i, line in enumerate(lines) if start_marker in line), -1)
+            screen = (
+                self.capture_screen(target, include_history=True)
+                if capture_history
+                else self.capture_screen(target)
+            )
+            lines = screen.splitlines()
+            start_index = max(
+                (i for i, line in enumerate(lines) if start_marker in line),
+                default=-1,
+            )
             current_output = "\n".join(lines[start_index + 1:]) if start_index >= 0 else ""
 
             input_need = detect_human_input_need(current_output)
@@ -340,8 +355,16 @@ class TmuxClient:
                 break
 
         if timed_out:
-            lines = self.capture_screen(target).splitlines()
-            start_index = next((i for i, line in enumerate(lines) if start_marker in line), -1)
+            screen = (
+                self.capture_screen(target, include_history=True)
+                if capture_history
+                else self.capture_screen(target)
+            )
+            lines = screen.splitlines()
+            start_index = max(
+                (i for i, line in enumerate(lines) if start_marker in line),
+                default=-1,
+            )
             end_index = next((i for i, line in enumerate(lines) if sentinel in line), len(lines))
             new_text = "\n".join(lines[start_index + 1:end_index]).strip() if start_index >= 0 else ""
             new_text, exit_code, _ = self._interrupt_and_collect(

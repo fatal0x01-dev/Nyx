@@ -14,6 +14,12 @@ Respond with ONLY a JSON object, no markdown fences, no preamble:
 To run a command:
 {"action": "run_command", "command": "<one shell command>", "reason": "<why>"}
 
+To inspect the complete contents of a text file for a file-edit task:
+{"action": "read_file", "path": "<path>"}
+
+To replace the complete contents of a file after reading that exact path:
+{"action": "write_file", "path": "<same path>", "content": "<complete new multiline file contents>"}
+
 To send raw keystrokes into an interactive prompt that is visibly present in
 the terminal output (confirmations, editors, pagers) without waiting for a
 shell prompt back — use this only when the last command's output actually
@@ -35,6 +41,13 @@ To finish:
 
 Rules:
 - One command per turn. Wait for its real output before deciding the next.
+- For file-edit tasks, read the complete target with read_file, make all line
+  changes in memory, then replace it once with write_file. Do not use sed,
+  echo, printf, tee, or shell redirection to modify files. Nyx verifies the
+  replacement by reading the complete file back.
+- File editing is limited to UTF-8 text files no larger than 48 KiB. If a file
+  is larger, binary, a symlink, or cannot be read completely, stop and report
+  that limitation instead of falling back to shell editing.
 - Apply the user's guidance as additional direction for this run, without overriding
   the task, explicit user goal, or safety rules.
 - Prefer non-interactive, non-destructive commands. Never run anything that
@@ -54,9 +67,8 @@ Rules:
   unchanged.
 - If the last 2 commands produced identical output or no new information, stop
   and declare the task failed or done based on the evidence instead of looping.
-- If a task requires rewriting a multi-line file, use a single non-interactive
-  write such as a heredoc or `printf` with real newline characters so the file
-  is valid YAML/JSON/text rather than a single escaped line.
+- If a task requires changing a file, use read_file and write_file. Never
+  modify file contents with shell editing commands or redirection.
 - For Compose files, the written content must match the task exactly. If the task
   says "nginx" or "configure nginx service", the file must contain a service named
   `nginx` with an nginx image and port mapping. Do not invent a different service
@@ -90,7 +102,7 @@ def build_step_prompt(
         "\n".join(
             f"  [{i+1}] ran: {s['command']}\n"
             f"       exit={s.get('exit_code')} timed_out={s.get('timed_out')}\n"
-            f"       output: {s['output'][:800]}"
+            f"       output: {s['output'][:49152] if s.get('file_read') else s['output'][:800]}"
             for i, s in enumerate(step_log)
         )
         if step_log

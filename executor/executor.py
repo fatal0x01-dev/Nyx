@@ -15,6 +15,13 @@ import re
 import shlex
 
 import config.settings as cfg
+from executor.file_operations import (
+    MAX_FILE_BYTES,
+    MISSING_FILE_SENTINEL,
+    build_read_file_command,
+    build_write_file_command,
+    decode_read_file_output,
+)
 from executor.shell_prompts import SYSTEM_PROMPT, build_step_prompt
 from tasks.task import Task
 from utils.helpers import parse_json_response, normalize_multiline_write_command
@@ -344,22 +351,60 @@ class Executor:
     @staticmethod
     def _requires_file_write(task_description: str) -> bool:
         text = (task_description or "").lower()
-        file_markers = ("docker-compose.yml", ".yml", ".yaml", "compose file")
+        file_markers = (
+            " file",
+            "file ",
+            "configuration",
+            "config file",
+            "docker-compose.yml",
+            ".py",
+            ".js",
+            ".ts",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".toml",
+            ".ini",
+            ".conf",
+            ".cfg",
+            ".md",
+            ".html",
+            ".css",
+            ".sh",
+            ".service",
+            ".txt",
+        )
         write_markers = ("write", "create", "fix", "update", "rewrite", "repair", "edit")
         return any(marker in text for marker in file_markers) and any(marker in text for marker in write_markers)
 
     @staticmethod
     def _is_file_write_command(command: str) -> bool:
-        text = (command or "").lower()
-        return (
-            "cat >" in text
-            or "tee " in text and ">" in text
-            or "printf" in text and ">" in text
-            or text.endswith(" > docker-compose.yml")
-            or text.endswith(" > docker-compose.yaml")
-            or "<<'eof'" in text.lower()
-            or "<<eof" in text.lower()
-        )
+        try:
+            lexer = shlex.shlex(command, posix=True, punctuation_chars="<>")
+            lexer.whitespace_split = True
+            tokens = list(lexer)
+        except ValueError:
+            return True
+        if any(token in {">", ">>", ">|", "<<", "<<<"} for token in tokens):
+            return True
+        for index, token in enumerate(tokens):
+            executable = token.rsplit("/", 1)[-1].lower()
+            arguments = tokens[index + 1:]
+            if executable == "sed" and any(
+                argument == "-i"
+                or argument.startswith("-i") and argument != "-i"
+                or argument == "--in-place"
+                for argument in arguments
+            ):
+                return True
+            if executable == "perl" and any(
+                argument.startswith("-") and "i" in argument[1:]
+                for argument in arguments
+            ):
+                return True
+            if executable == "tee" and arguments:
+                return True
+        return False
 
     @staticmethod
     def _has_write_step(step_log: list[dict]) -> bool:
@@ -367,7 +412,10 @@ class Executor:
             return False
         return any(
             isinstance(step, dict)
-            and Executor._is_file_write_command(str(step.get("command", "")))
+            and (
+                step.get("file_operation") == "write"
+                or Executor._is_file_write_command(str(step.get("command", "")))
+            )
             for step in step_log
         )
 
@@ -432,6 +480,8 @@ class Executor:
         for step in step_log or []:
             if not isinstance(step, dict):
                 continue
+            if step.get("file_operation") == "read":
+                return True
             command = str(step.get("command", "")).lower()
             if any(marker in command for marker in ("cat ", "sed -n", "head ", "tail ", "grep ", "less ", "more ", "wc -l")):
                 return True
@@ -612,8 +662,210 @@ class Executor:
             action = self._normalize_action(action, task.description)
             kind = action.get("action")
 
+            if kind in {"read_file", "write_file"}:
+                if not self._requires_file_write(task.description):
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": (
+                            "Dedicated file editing is available only for tasks that explicitly "
+                            "request creating or changing a file."
+                        ),
+                    }
+
+                path = action.get("path")
+                if not isinstance(path, str) or not path.strip():
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": f"{kind} requires a non-empty path.",
+                    }
+                path = path.strip()
+
+                if kind == "read_file":
+                    try:
+                        command = build_read_file_command(path)
+                    except ValueError as error:
+                        return {"status": "failed", "result": "", "error": str(error)}
+                    try:
+                        file_result = self._tmux.run_command(
+                            target,
+                            command,
+                            timeout=cfg.SHELL_COMMAND_TIMEOUT,
+                            capture_history=True,
+                        )
+                    except TmuxError as error:
+                        self._last_step_log = list(step_log)
+                        return {
+                            "status": "failed",
+                            "result": "",
+                            "error": f"Could not read file {path}: {error}",
+                        }
+                    output = str(file_result.get("output", ""))
+                    if file_result.get("timed_out") or file_result.get("exit_code") != 0:
+                        step_log.append({
+                            "command": f"<read_file {path}>",
+                            "output": output[-2000:],
+                            "exit_code": file_result.get("exit_code"),
+                            "timed_out": file_result.get("timed_out", False),
+                            "file_operation": "read",
+                            "file_path": path,
+                        })
+                        self._last_step_log = list(step_log)
+                        return {
+                            "status": "failed",
+                            "result": "",
+                            "error": f"Could not read complete file {path}: {output[-1000:]}",
+                        }
+                    if output.strip() == "__NYX_FILE_MISSING__":
+                        content = ""
+                        file_exists = False
+                    else:
+                        try:
+                            content = decode_read_file_output(output)
+                        except ValueError as error:
+                            return {
+                                "status": "failed",
+                                "result": "",
+                                "error": f"Could not read complete file {path}: {error}",
+                            }
+                        file_exists = True
+                    if len(content.encode("utf-8")) > MAX_FILE_BYTES:
+                        return {
+                            "status": "failed",
+                            "result": "",
+                            "error": f"File {path} exceeds Nyx's {MAX_FILE_BYTES}-byte limit.",
+                        }
+                    step_log.append({
+                        "command": f"<read_file {path}>",
+                        "output": content if file_exists else "(file does not exist yet)",
+                        "exit_code": 0,
+                        "timed_out": False,
+                        "file_operation": "read",
+                        "file_path": path,
+                        "file_exists": file_exists,
+                        "file_read": True,
+                    })
+                    self._last_step_log = list(step_log)
+                    continue
+
+                if not any(
+                    entry.get("file_operation") == "read"
+                    and entry.get("file_path") == path
+                    and entry.get("exit_code") == 0
+                    for entry in step_log
+                ):
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": (
+                            f"Read {path} successfully before writing it. Nyx only permits "
+                            "replacing the exact file reviewed in this task."
+                        ),
+                    }
+                content = action.get("content")
+                if not isinstance(content, str):
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": "write_file requires the complete file contents as a string.",
+                    }
+                try:
+                    command = build_write_file_command(path, content)
+                except ValueError as error:
+                    return {"status": "failed", "result": "", "error": str(error)}
+                try:
+                    write_result = self._tmux.run_command(
+                        target,
+                        command,
+                        timeout=cfg.SHELL_COMMAND_TIMEOUT,
+                    )
+                except TmuxError as error:
+                    self._last_step_log = list(step_log)
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": f"Could not atomically write {path}: {error}",
+                    }
+                step_log.append({
+                    "command": f"<write_file {path}>",
+                    "output": str(write_result.get("output", "")),
+                    "exit_code": write_result.get("exit_code"),
+                    "timed_out": write_result.get("timed_out", False),
+                    "file_operation": "write",
+                    "file_path": path,
+                })
+                self._last_step_log = list(step_log)
+                if write_result.get("timed_out") or write_result.get("exit_code") != 0:
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": f"Atomic write of {path} failed: {write_result.get('output', '')}",
+                    }
+
+                try:
+                    verify_result = self._tmux.run_command(
+                        target,
+                        build_read_file_command(path),
+                        timeout=cfg.SHELL_COMMAND_TIMEOUT,
+                        capture_history=True,
+                    )
+                    verified_content = decode_read_file_output(
+                        str(verify_result.get("output", ""))
+                    )
+                except (TmuxError, ValueError) as error:
+                    step_log.append({
+                        "command": f"<verify_file {path}>",
+                        "output": f"Read-back verification failed: {error}",
+                        "exit_code": None,
+                        "timed_out": False,
+                        "file_operation": "verify",
+                        "file_path": path,
+                    })
+                    self._last_step_log = list(step_log)
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": f"Could not verify the complete contents of {path}: {error}",
+                    }
+                if verify_result.get("timed_out") or verify_result.get("exit_code") != 0:
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": f"Could not verify the complete contents of {path}.",
+                    }
+                if verified_content != content:
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": f"Read-back contents differ from the requested contents of {path}.",
+                    }
+                step_log.append({
+                    "command": f"<verify_file {path}>",
+                    "output": "Read-back verification matched the complete requested file contents.",
+                    "exit_code": 0,
+                    "timed_out": False,
+                    "file_operation": "verify",
+                    "file_path": path,
+                })
+                self._last_step_log = list(step_log)
+                continue
+
             if kind == "done":
                 status = action.get("status", "completed")
+                if (
+                    status == "completed"
+                    and self._requires_file_write(task.description)
+                    and not self._has_write_step(step_log)
+                ):
+                    return {
+                        "status": "failed",
+                        "result": "",
+                        "error": (
+                            "File-edit task ended without a verified write_file action. "
+                            "Read the target, write the complete contents, and verify them."
+                        ),
+                    }
                 if status == "completed" and self._is_validation_task(task.description) and not self._has_file_read_step(step_log):
                     log.warning(
                         "Task %s: validation task ended without reading the target file; refusing completion.",
@@ -706,17 +958,14 @@ class Executor:
                     continue
 
                 if self._requires_file_write(task.description):
-                    if not self._is_file_write_command(command) and not any(
-                        probe in command.lower() for probe in ("cat ", "sed -n", "docker-compose config", "docker-compose up")
-                    ):
-                        log.warning(
-                            "Task %s: non-write action attempted for file-editing task; refusing to continue loop.",
-                            task.id,
-                        )
+                    if self._is_file_write_command(command):
                         return {
                             "status": "failed",
                             "result": "",
-                            "error": "This task is about writing a config file, but the agent attempted a non-write action instead of editing the file.",
+                            "error": (
+                                "Shell-based file modification is disabled for file-edit tasks. "
+                                "Use read_file followed by write_file with the complete contents."
+                            ),
                         }
 
                 command = normalize_multiline_write_command(command)

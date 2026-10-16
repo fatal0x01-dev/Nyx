@@ -219,6 +219,13 @@ commands and scripts can still make system changes. Review Nyx's goal and
 suggestions, monitor its terminal, and do not delegate operations that must be
 guaranteed harmless.
 
+For explicit file-edit tasks, Nyx reads the complete UTF-8 text file, asks the
+executor to produce the complete replacement contents, writes through an
+atomic temporary-file replacement, and reads the file back to verify an exact
+match. Editing is limited to files up to 48 KiB; symlinks and non-regular
+targets are refused. Shell-based edits such as `sed -i` and redirection are
+blocked for these tasks.
+
 Use it for tasks you are comfortable delegating to a local shell agent. It is not a general-purpose, permissioned cloud automation platform.
 
 ## Status
